@@ -1,13 +1,14 @@
 """Shared pytest fixtures for the odoo-mcp test suite.
 
-Autouse fixture that clears module-level field cache before each test,
-preventing _field_cache / _field_cache_timestamps from leaking between
-test files (NRA-597).
+Autouse fixture that clears the module-level field schema cache before each
+test, preventing _field_cache / _field_cache_timestamps from leaking between
+test files (NRA-597). The cache lives in odoo_mcp.core.field_schema and is
+shared by the summary services and the record field validation.
 """
 
 import pytest
 
-from odoo_mcp.tools.records import (
+from odoo_mcp.core.field_schema import (
     _field_cache,
     _field_cache_timestamps,
 )

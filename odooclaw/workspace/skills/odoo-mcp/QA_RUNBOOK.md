@@ -131,6 +131,30 @@ Resources esperados:
 
 ---
 
+### 4. E2E automatizado de los resúmenes dinámicos
+
+`tests/e2e_summary_fields.py` ejecuta las tools reales contra la instancia
+(login, delegación `/odooclaw/call_kw_as_user`, resumen) y verifica el
+descubrimiento dinámico de campos (issue #81):
+
+```bash
+ODOO_URL=... ODOO_DB=... ODOO_USERNAME=... ODOO_PASSWORD=... ODOOCLAW_REPLY_TOKEN=... \
+  PYTHONPATH=src python tests/e2e_summary_fields.py
+```
+
+Resultado esperado: `14/14 checks passed` (código de salida 0).
+
+Preparación que asume:
+
+- un partner con `mobile` relleno (`E2E_PARTNER_NAME`, por defecto `E2E Mobile Co`);
+- para el caso del modelo inexistente, `odooclaw.extra_allowed_models` con ese
+  modelo (p. ej. `does.not.exist`); sin ese escape hatch el guard de seguridad
+  contesta antes que el resumen y ese check falla explicándolo;
+- si la instancia no tiene `account` / `sale`, los contadores del resumen deben
+  salir `null` — es lo que comprueba la rama del "instance without accounting".
+
+---
+
 ## Fase 1 - Conexión y sesión
 
 ### Caso 1.1 - Login inicial
