@@ -18,6 +18,7 @@ from odoo_mcp.core.client import OdooClient
 from odoo_mcp.core.session import OdooSession
 from odoo_mcp.services.generic_service import get_record_summary
 from odoo_mcp.services.partner_service import get_partner_summary
+from odoo_mcp.tools import records as records_tool
 
 # ---------------------------------------------------------------------------
 # A fake Odoo that behaves like the real one where it matters
@@ -365,13 +366,22 @@ def test_record_summary_of_an_unknown_model_returns_an_actionable_error():
     assert "odoo_get_model_schema" in summary["error"]
 
 
-def test_record_summary_falls_back_when_one_field_cannot_be_read():
-    """A broken compute on a single field must not sink the summary."""
+def test_record_summary_skips_the_fields_that_raise_and_keeps_the_rest():
+    """A field Odoo refuses to read costs only that field, never the record.
+
+    Regression for the review of PR #114: the old fallback collapsed to
+    `name`/`display_name`/`id`, so an internal user without accounting got a
+    three-field summary — the #81 symptom again, for that class of user.
+    `categ_id` is not in that minimal set, so its presence proves no collapse.
+    """
     client = _client(
         schemas={"product.template": PRODUCT_SCHEMA},
         records={
             ("product.template", 5): make_record(
-                PRODUCT_SCHEMA, name="Blue Widget", default_code="W-BLU"
+                PRODUCT_SCHEMA,
+                name="Blue Widget",
+                default_code="W-BLU",
+                categ_id=[3, "Widgets"],
             )
         },
         broken_read_fields={"default_code", "list_price", "is_storable"},
@@ -381,6 +391,10 @@ def test_record_summary_falls_back_when_one_field_cannot_be_read():
 
     assert summary["name"] == "Blue Widget"
     assert summary["id"] == 5
+    assert summary["categ_id"] == [3, "Widgets"]   # not in the minimal fallback
+    assert "default_code" not in summary           # raised
+    assert "list_price" not in summary             # raised
+    assert "is_storable" not in summary            # raised
 
 
 # ---------------------------------------------------------------------------
@@ -426,3 +440,173 @@ def test_expired_cache_is_refetched():
 
     fresh = field_schema.select_summary_fields(client, "res.partner", 2)
     assert "x_custom_field" in fresh
+
+
+def test_records_field_validation_sees_the_schema_after_the_ttl():
+    """The TTL fix is reachable through ``tools.records``, not only the helper.
+
+    On `main` the old cache compared a timestamp with itself, so it never
+    expired and a field added to the instance was never picked up.
+    """
+    client = _client(
+        schemas={"res.partner": PARTNER_SCHEMA},
+        records={("res.partner", 1): PARTNER_RECORD},
+    )
+
+    assert "mobile" in records_tool._get_model_fields(client, "res.partner", 2)
+
+    client.schemas["res.partner"]["x_custom_field"] = {"type": "char"}
+    assert "x_custom_field" not in records_tool._get_model_fields(
+        client, "res.partner", 2
+    )  # still cached
+
+    for key, ts in list(field_schema._field_cache_timestamps.items()):
+        field_schema._field_cache_timestamps[key] = ts - (
+            field_schema.FIELD_CACHE_TTL_SECONDS + 1
+        )
+
+    assert "x_custom_field" in records_tool._get_model_fields(client, "res.partner", 2)
+
+
+# ---------------------------------------------------------------------------
+# A user whose schema advertises fields their computes cannot answer
+# ---------------------------------------------------------------------------
+
+#: What an instance with ``account`` hands an internal user: no ``credit``/
+#: ``debit`` (group-restricted), but three accounting computes whose read
+#: raises ``AccessError`` — measured on Odoo 18 (154 fields for the internal
+#: user vs 163 for admin).
+INTERNAL_PARTNER_SCHEMA = {
+    name: props
+    for name, props in PARTNER_SCHEMA.items()
+    if name not in ("credit", "debit")
+}
+INTERNAL_PARTNER_SCHEMA.update(
+    {
+        "days_sales_outstanding": {"type": "float"},
+        "journal_item_count": {"type": "integer"},
+        "supplier_invoice_count": {"type": "integer"},
+    }
+)
+ACCOUNTING_FIELDS_THAT_RAISE = (
+    "days_sales_outstanding",
+    "journal_item_count",
+    "supplier_invoice_count",
+)
+
+
+def test_partner_summary_keeps_mobile_when_accounting_computes_raise():
+    """The review case: only the fields that raise are lost, never the rest.
+
+    Before the fix this summary collapsed to ``id``/``name``/``display_name``
+    — no ``mobile``, no ``street``, no ``city``: the #81 symptom again for a
+    user without accounting permissions.
+    """
+    record = make_record(
+        INTERNAL_PARTNER_SCHEMA,
+        name="E2E Mobile Co",
+        display_name="E2E Mobile Co",
+        mobile="+34600000001",
+        street="Calle E2E 1",
+        city="Santa Cruz de Tenerife",
+    )
+    client = _client(
+        schemas={
+            "res.partner": INTERNAL_PARTNER_SCHEMA,
+            "sale.order": SALE_SCHEMA,
+            "account.move": INVOICE_SCHEMA,
+        },
+        records={("res.partner", 1): record},
+        broken_read_fields=ACCOUNTING_FIELDS_THAT_RAISE,
+    )
+
+    summary = get_partner_summary(client, 10, 1)
+
+    assert summary["mobile"] == "+34600000001"
+    assert summary["street"] == "Calle E2E 1"
+    assert summary["city"] == "Santa Cruz de Tenerife"
+    assert not [f for f in ACCOUNTING_FIELDS_THAT_RAISE if f in summary]
+    assert "financial_balance" not in summary   # no accounting for this user
+    # locating the bad fields must stay cheap and bounded
+    reads = [c for c in client.calls if c[1] == "read"]
+    assert len(reads) <= field_schema._MAX_PROBE_READS + 2
+
+
+def test_probe_budget_bounds_the_reads_when_almost_everything_raises():
+    """No matter how broken the instance is, one summary stays bounded."""
+    broken = set(PARTNER_SCHEMA) - {"name"}
+    client = _client(
+        schemas={"res.partner": PARTNER_SCHEMA},
+        records={("res.partner", 1): PARTNER_RECORD},
+        broken_read_fields=broken,
+    )
+
+    summary = get_partner_summary(client, 2, 1)
+
+    assert summary["name"] == "E2E Mobile Co"   # what could be read, was read
+    reads = [c for c in client.calls if c[1] == "read"]
+    assert len(reads) <= field_schema._MAX_PROBE_READS + 2
+
+
+def test_unreadable_fields_are_remembered_for_the_ttl():
+    """Only the first summary pays for finding the bad fields.
+
+    Locating three unreadable computes on a 154-field schema costs ~29 reads;
+    the next summary must be a single read, not a repeat of the search.
+    """
+    record = make_record(
+        INTERNAL_PARTNER_SCHEMA,
+        name="E2E Mobile Co",
+        display_name="E2E Mobile Co",
+        mobile="+34600000001",
+    )
+    client = _client(
+        schemas={
+            "res.partner": INTERNAL_PARTNER_SCHEMA,
+            "sale.order": SALE_SCHEMA,
+            "account.move": INVOICE_SCHEMA,
+        },
+        records={("res.partner", 1): record},
+        broken_read_fields=ACCOUNTING_FIELDS_THAT_RAISE,
+    )
+
+    first = get_partner_summary(client, 10, 1)
+    first_reads = len([c for c in client.calls if c[1] == "read"])
+
+    second = get_partner_summary(client, 10, 1)
+    second_reads = len([c for c in client.calls if c[1] == "read"]) - first_reads
+
+    assert first["mobile"] == "+34600000001"
+    assert second["mobile"] == "+34600000001"
+    assert first_reads > 1                       # the search did happen
+    assert second_reads == 1                     # ... and only once
+
+
+def test_the_schema_cache_is_keyed_by_user():
+    """``fields_get`` answers differently per user, so the cache must too."""
+    admin_schema = {k: v for k, v in PARTNER_SCHEMA.items()}
+    internal_schema = {k: v for k, v in INTERNAL_PARTNER_SCHEMA.items()}
+    client = FakeOdoo(
+        schemas={"res.partner": admin_schema},
+        records={("res.partner", 1): PARTNER_RECORD},
+    )
+
+    def call_kw(model, method, *args, **kwargs):
+        client.calls.append((model, method, kwargs))
+        if method == "fields_get":
+            return dict(
+                internal_schema if kwargs.get("sender_id") == 10 else admin_schema
+            )
+        return FakeOdoo.call_kw(client, model, method, *args, **kwargs)
+
+    client.call_kw = call_kw
+
+    as_admin = field_schema.select_summary_fields(client, "res.partner", 2)
+    as_internal = field_schema.select_summary_fields(client, "res.partner", 10)
+
+    assert "credit" in as_admin
+    assert "credit" not in as_internal
+    assert "journal_item_count" in as_internal
+    # both were fetched: the cache did not hand the internal user the admin's schema
+    fields_gets = [c for c in client.calls if c[1] == "fields_get"]
+    assert len(fields_gets) == 2

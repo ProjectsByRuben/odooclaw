@@ -11,6 +11,7 @@ import pytest
 from odoo_mcp.core.field_schema import (
     _field_cache,
     _field_cache_timestamps,
+    _unreadable_cache,
 )
 
 
@@ -19,4 +20,5 @@ def clear_field_cache():
     """Reset module-level field cache before each test."""
     _field_cache.clear()
     _field_cache_timestamps.clear()
+    _unreadable_cache.clear()
     yield
