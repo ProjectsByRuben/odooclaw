@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	namePattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+	namePattern        = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	reFrontmatter      = regexp.MustCompile(`(?s)^---(?:\r\n|\n|\r)(.*?)(?:\r\n|\n|\r)---`)
 	reStripFrontmatter = regexp.MustCompile(`(?s)^---(?:\r\n|\n|\r)(.*?)(?:\r\n|\n|\r)---(?:\r\n|\n|\r)*`)
 )
@@ -28,11 +28,11 @@ const (
 
 // SkillMetadata holds the parsed frontmatter for a skill.
 type SkillMetadata struct {
-	Name        string            `yaml:"name"`
-	Description string            `yaml:"description"`
-	License     string            `yaml:"license,omitempty"`
-	Compatibility string        `yaml:"compatibility,omitempty"`
-	Metadata    map[string]string `yaml:"metadata,omitempty"`
+	Name          string            `yaml:"name"`
+	Description   string            `yaml:"description"`
+	License       string            `yaml:"license,omitempty"`
+	Compatibility string            `yaml:"compatibility,omitempty"`
+	Metadata      map[string]string `yaml:"metadata,omitempty"`
 }
 
 // SkillInfo is the public-facing representation returned by ListSkills.
@@ -327,17 +327,21 @@ func buildMetadataMap(node *yaml.Node) map[string]string {
 			// string value → keep as-is
 			result[key] = valNode.Value
 		case yaml.MappingNode, yaml.SequenceNode:
-			// nested structure → serialize as JSON string
-			jsonBytes, err := json.Marshal(valNode.Content)
-			if err == nil {
-				result[key] = string(jsonBytes)
+			// nested structure → decode to Go value, then marshal to JSON string
+			var v any
+			if err := valNode.Decode(&v); err == nil {
+				if b, err := json.Marshal(v); err == nil {
+					result[key] = string(b)
+				}
 			}
 		case yaml.AliasNode:
-			// alias node → resolve and serialize
+			// alias node → decode the aliased value, then marshal as JSON string
 			if valNode.Alias != nil {
-				jsonBytes, err := json.Marshal(valNode.Alias.Content)
-				if err == nil {
-					result[key] = string(jsonBytes)
+				var v any
+				if err := valNode.Alias.Decode(&v); err == nil {
+					if b, err := json.Marshal(v); err == nil {
+						result[key] = string(b)
+					}
 				}
 			}
 		}

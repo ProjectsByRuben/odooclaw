@@ -18,5 +18,5 @@ the loader does not pick it up.
 
 ## References
 
-- Issue [NRA-4179](https://github.com/nicolasramos/odooclaw/issues/4179):
+- PR [#121](https://github.com/nicolasramos/odooclaw/pull/121):
   Clarification that this directory is not a skill.
