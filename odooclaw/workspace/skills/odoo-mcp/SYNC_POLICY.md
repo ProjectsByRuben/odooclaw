@@ -1,64 +1,55 @@
-# Política de sincronización: odoo-mcp
+# Synchronization Policy: odoo-mcp
 
-## Declaración de canonicidad
+## Canonical vs Derived Declaration
 
-**Repo canónico**: `https://github.com/nicolasramos/odooclaw-mcp`  
-**Copia derivada**: `odooclaw/workspace/skills/odoo-mcp/` (dentro de `nicolasramos/odooclaw`)
+**Canonical repo**: `https://github.com/nicolasramos/odooclaw-mcp`  
+**Derived copy**: `odooclaw/workspace/skills/odoo-mcp/` (embedded in `nicolasramos/odooclaw`)
 
-La copia embebida es DERIVADA. NO debe editarse a mano. Todas las modificaciones
-al servidor de herramientas se realizan en el repo canónico y se propagan a la
-copia embebida mediante el script de sync.
+The embedded copy is DERIVED. It MUST NOT be edited manually. All modifications
+to the tool server code are made in the canonical repo and propagated to the
+embedded copy via the sync script.
 
-## Cómo regenerar la copia derivada
+## How to Regenerate the Derived Copy
 
 ```bash
-# Clonar el repo canónico (una vez)
+# Clone the canonical repo (one-time)
 git clone https://github.com/nicolasramos/odooclaw-mcp.git /tmp/odooclaw-mcp
 
-# Ejecutar el sync (desde la raíz del repo odooclaw)
+# Run sync (from the odooclaw repo root)
 ./scripts/sync-odoo-mcp.sh
 
-# O modo dry-run para ver qué cambiaría sin escribir
+# Or preview mode to see what would change without writing
 ./scripts/sync-odoo-mcp.sh --dry-run
 ```
 
-El script copia los siguientes paths del canónico → embebido:
-- `src/odoo_mcp/**` — todo el código fuente
-- `tests/**` — todos los tests
-- `requirements.txt` — dependencias
+The script copies these paths from canonical → embedded:
+- `src/odoo_mcp/**` — all source code
+- `tests/**` — all tests
+- `requirements.txt` — dependencies
 
-## Protección CI
+## CI Protection
 
-El workflow `.github/workflows/odoo-mcp-sync.yml` se ejecuta:
-- En cada push/PR que modifique archivos embebidos
-- Diariamente a las 06:00 UTC (lunes)
+The workflow `.github/workflows/odoo-mcp-sync.yml` runs:
+- On every push/PR that modifies embedded files
+- Daily at 06:00 UTC (Mondays)
 
-Si detecta divergencia entre ambos repos, **falla la build**.
+If it detects divergence between the two repos, the **build FAILS**.
 
-## Archivos no sincronizados
+## Embedded-Only Files
 
-Los siguientes archivos existen solo en la copia embebida y NO se sync:
-- `FIXES_SUMMARY.md` — historial de fixes locales
-- `QA_RUNBOOK.md` — runbook de QA específico del contexto embebido
-- `TOOL_INVENTORY.md` — inventario generado (fuente de referencia)
+The following files exist only in the embedded copy and are NOT synced:
+- `FIXES_SUMMARY.md` — local fix history
+- `QA_RUNBOOK.md` — QA runbook specific to the embedded context
+- `TOOL_INVENTORY.md` — generated inventory (reference)
+- `SYNC_POLICY.md` — this policy document
+- `README.md` — contextual documentation (differs by repo: Spanish/embedded vs English/standalone)
 
-Estos archivos son específicos del contexto de uso dentro de `odooclaw` y no
-tienen análogo en el repo canónico.
+These files are specific to the embedded usage context within `odooclaw` and
+have no counterpart in the canonical repo.
 
-## Si necesitas modificar el servidor de herramientas
+## Divergence History
 
-1. Edita los archivos en `nicolasramos/odooclaw-mcp` (repo canónico)
-2. Haz commit y push en ese repo
-3. Ejecuta `./scripts/sync-odoo-mcp.sh` en `odooclaw`
-4. Haz commit de los cambios sincronizados en `odooclaw`
-5. Verifica que la CI pasa
+As of 2026-10-13: 54 homonymous files, 0 identical. The solution declares
+the canonical repo as source of truth and derives the embedded copy.
 
-## Historial de divergencia
-
-Al 2026-10-13: 54 ficheros homónimos, 0 idénticos. La solución es declarar
-el repo canónico como fuente de verdad y derivar la copia embebida.
-
-## Excepciones
-
-Los siguientes archivos NO se comparan en la CI (difieren por contexto, no por error):
-- `README.md` — la documentación contextual difiere entre repos (español vs inglés, enfoque embebido vs standalone)
+After sync: 82 homonymous files, 81 identical (README.md excluded by context).

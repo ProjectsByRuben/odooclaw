@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# sync-odoo-mcp.sh — Regenera la copia embebida desde el repo canónico
+# sync-odoo-mcp.sh — Regenerates the embedded odoo-mcp copy from the canonical repo.
 #
-# Uso: scripts/sync-odoo-mcp.sh [--dry-run]
+# Usage: scripts/sync-odoo-mcp.sh [--dry-run]
 #
-# Este script copia el código fuente del servidor de herramientas desde
-# el repo canónico (nicolasramos/odooclaw-mcp) a la copia embebida en
+# This script copies the tool server source code from the canonical repo
+# (nicolasramos/odooclaw-mcp) to the embedded copy in
 # odooclaw/workspace/skills/odoo-mcp/.
 #
-# La copia embebida es DERIVADA y NO debe editarse a mano.
-# Si necesitas cambiar código del servidor de herramientas, edítalo
-# en el repo canónico y ejecuta este script.
+# The embedded copy is DERIVED and MUST NOT be edited manually.
+# If you need to change tool server code, edit the canonical repo and run this script.
 
 set -euo pipefail
 
@@ -22,30 +21,25 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EMBEDDED_DIR="$REPO_ROOT/odooclaw/workspace/skills/odoo-mcp"
 CANONICAL_DIR="${ODOO_MCP_CANONICAL_DIR:-/tmp/odooclaw-mcp}"
 
-# Verificar que el repo canónico existe
+# Verify canonical repo exists
 if [ ! -d "$CANONICAL_DIR/.git" ]; then
-    echo "ERROR: El repo canónico no se encuentra en $CANONICAL_DIR" >&2
-    echo "Clónalo con: git clone https://github.com/nicolasramos/odooclaw-mcp.git $CANONICAL_DIR" >&2
+    echo "ERROR: Canonical repo not found at $CANONICAL_DIR" >&2
+    echo "Clone it with: git clone https://github.com/nicolasramos/odooclaw-mcp.git $CANONICAL_DIR" >&2
     exit 1
 fi
 
-# Directorio de destino temporal (para comparar antes de sobrescribir)
-SYNC_TMP="$REPO_ROOT/.tmp-sync-odoo-mcp"
-mkdir -p "$SYNC_TMP"
-
 echo "=== Sync odoo-mcp ==="
-echo "Canónico:  $CANONICAL_DIR"
-echo "Destino:   $EMBEDDED_DIR"
+echo "Canonical: $CANONICAL_DIR"
+echo "Embedded:  $EMBEDDED_DIR"
 echo ""
 
-# Copiar solo los archivos de código fuente (excluyendo .git, docs, CI, etc.)
-# Lo que se sync: src/ + tests/ + requirements.txt
+# --- Sync shared source files (src/, tests/, requirements.txt) ---
 (cd "$CANONICAL_DIR" && find src tests requirements.txt -type f) | while read -r relpath; do
     src_file="$CANONICAL_DIR/$relpath"
     dst_file="$EMBEDDED_DIR/$relpath"
 
     if [ ! -f "$src_file" ]; then
-        echo "SKIP (no existe en canónico): $relpath"
+        echo "SKIP (not in canonical): $relpath"
         continue
     fi
 
@@ -62,13 +56,31 @@ echo ""
     fi
 done
 
+# --- Remove embedded-only files that should not exist ---
+comm -23 \
+    <(find "$EMBEDDED_DIR" src tests requirements.txt -type f 2>/dev/null | sed "s|^$EMBEDDED_DIR/||" | sort) \
+    <(cd "$CANONICAL_DIR" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||' | sort) \
+| while read -r relpath; do
+    # Skip documentation files that are embedded-only by design
+    case "$relpath" in
+        FIXES_SUMMARY.md|QA_RUNBOOK.md|TOOL_INVENTORY.md|SYNC_POLICY.md)
+            echo "KEEP   $relpath (embedded-only documentation)"
+            continue
+            ;;
+    esac
+
+    if $DRY_RUN; then
+        echo "DELETE $relpath"
+    else
+        rm -f "$EMBEDDED_DIR/$relpath"
+        echo "DELETE $relpath"
+    fi
+done
+
 if $DRY_RUN; then
     echo ""
-    echo "Modo dry-run: no se han escrito cambios."
+    echo "Dry-run mode: no changes written."
 else
     echo ""
-    echo "Sync completado. Revisa los cambios con: git diff $EMBEDDED_DIR"
+    echo "Sync complete. Review with: git diff $EMBEDDED_DIR"
 fi
-
-# Limpiar temporal
-rm -rf "$SYNC_TMP"

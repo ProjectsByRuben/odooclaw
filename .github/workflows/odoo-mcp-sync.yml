@@ -1,5 +1,5 @@
-# CI: Verifica que la copia embebida de odoo-mcp no diverge del repo canónico.
-# FALLE si hay diferencias entre los archivos de código fuente.
+# CI: Verify the embedded odoo-mcp copy matches the canonical repo.
+# FAILS if any source file diverges or if files exist in only one side.
 
 name: "odoo-mcp sync check"
 
@@ -12,7 +12,6 @@ on:
     paths:
       - "odooclaw/workspace/skills/odoo-mcp/**"
       - ".github/workflows/odoo-mcp-sync.yml"
-  # Run daily to catch drift
   schedule:
     - cron: "0 6 * * 1"
 
@@ -36,34 +35,67 @@ jobs:
           path: .canonical-odoo-mcp
           fetch-depth: 1
 
-      - name: Compare embedded vs canonical source files
+      - name: Compare embedded vs canonical (bidirectional)
         run: |
           EMBEDDED="odooclaw/workspace/skills/odoo-mcp"
           CANONICAL=".canonical-odoo-mcp"
-          FAIL=0
+          DIFFS=""
 
-          # Files that exist in both repos — compare them (exclude README.md, docs)
+          # --- Shared files: check for content differences ---
           comm -12 \
             <(find "$EMBEDDED" src tests requirements.txt -type f 2>/dev/null | sed "s|^$EMBEDDED/||" | sort) \
             <(cd "$CANONICAL" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||' | sort) \
           | while read -r relpath; do
-              # Skip README — documentation differs by context
               case "$relpath" in
                 README.md) continue ;;
               esac
-
               if [ -f "$EMBEDDED/$relpath" ] && [ -f "$CANONICAL/$relpath" ]; then
                 if ! diff -q "$EMBEDDED/$relpath" "$CANONICAL/$relpath" > /dev/null 2>&1; then
-                  echo "DIFFER: $relpath" >&2
-                  FAIL=1
+                  echo "DIFFER: $relpath"
                 fi
               fi
-            done
+            done > /tmp/odoo-mcp-shared-diffs
 
-          if [ "$FAIL" -ne 0 ]; then
-            echo "::error::La copia embebida diverge del repo canónico nicolasramos/odooclaw-mcp." >&2
-            echo "Ejecuta scripts/sync-odoo-mcp.sh para regenerar la copia embebida." >&2
+          # --- Embedded-only files ---
+          comm -23 \
+            <(find "$EMBEDDED" src tests requirements.txt -type f 2>/dev/null | sed "s|^$EMBEDDED/||" | sort) \
+            <(cd "$CANONICAL" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||' | sort) \
+          > /tmp/odoo-mcp-embedded-only
+
+          # --- Canonical-only files ---
+          comm -13 \
+            <(find "$EMBEDDED" src tests requirements.txt -type f 2>/dev/null | sed "s|^$EMBEDDED/||" | sort) \
+            <(cd "$CANONICAL" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||' | sort) \
+          > /tmp/odoo-mcp-canonical-only
+
+          # --- Report results ---
+          SHARED_DIFF=$(wc -l < /tmp/odoo-mcp-shared-diffs | tr -d ' ')
+          EMBEDDED_ONLY=$(wc -l < /tmp/odoo-mcp-embedded-only | tr -d ' ')
+          CANONICAL_ONLY=$(wc -l < /tmp/odoo-mcp-canonical-only | tr -d ' ')
+
+          echo "Shared files with differences: $SHARED_DIFF"
+          echo "Files only in embedded copy:   $EMBEDDED_ONLY"
+          echo "Files only in canonical repo:   $CANONICAL_ONLY"
+
+          if [ "$SHARED_DIFF" -gt 0 ]; then
+            echo "::error::Content divergence detected in shared files:"
+            cat /tmp/odoo-mcp-shared-diffs | sed 's/^/  /'
+          fi
+
+          if [ "$EMBEDDED_ONLY" -gt 0 ]; then
+            echo "::error::Source files exist only in the embedded copy (should be in canonical):"
+            cat /tmp/odoo-mcp-embedded-only | sed 's/^/  /'
+          fi
+
+          if [ "$CANONICAL_ONLY" -gt 0 ]; then
+            echo "::error::Source files exist only in canonical repo (not synced):"
+            cat /tmp/odoo-mcp-canonical-only | sed 's/^/  /'
+          fi
+
+          TOTAL_ISSUES=$((SHARED_DIFF + EMBEDDED_ONLY + CANONICAL_ONLY))
+          if [ "$TOTAL_ISSUES" -gt 0 ]; then
+            echo "::error::Embedded copy diverges from canonical. Run ./scripts/sync-odoo-mcp.sh to regenerate."
             exit 1
           fi
 
-          echo "OK: La copia embebida está sincronizada con el repo canónico."
+          echo "OK: Embedded copy is in sync with canonical repo."
