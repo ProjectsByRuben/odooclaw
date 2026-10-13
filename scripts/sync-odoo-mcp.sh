@@ -56,14 +56,23 @@ echo ""
     fi
 done
 
+# --- Build file lists for embedded-only detection ---
+{
+    find "$EMBEDDED_DIR/src" "$EMBEDDED_DIR/tests" "$EMBEDDED_DIR/requirements.txt" -type f 2>/dev/null | sed "s|^$EMBEDDED_DIR/||"
+    if [ -f "$EMBEDDED_DIR/README.md" ]; then
+        echo "README.md"
+    fi
+} | sort -u > /tmp/odoo-mcp-embedded-files
+
+{
+    (cd "$CANONICAL_DIR" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||')
+} | sort -u > /tmp/odoo-mcp-canonical-files
+
 # --- Remove embedded-only files that should not exist ---
-comm -23 \
-    <(find "$EMBEDDED_DIR" src tests requirements.txt -type f 2>/dev/null | sed "s|^$EMBEDDED_DIR/||" | sort) \
-    <(cd "$CANONICAL_DIR" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||' | sort) \
-| while read -r relpath; do
+comm -23 /tmp/odoo-mcp-embedded-files /tmp/odoo-mcp-canonical-files | while read -r relpath; do
     # Skip documentation files that are embedded-only by design
     case "$relpath" in
-        FIXES_SUMMARY.md|QA_RUNBOOK.md|TOOL_INVENTORY.md|SYNC_POLICY.md)
+        FIXES_SUMMARY.md|QA_RUNBOOK.md|TOOL_INVENTORY.md|SYNC_POLICY.md|README.md)
             echo "KEEP   $relpath (embedded-only documentation)"
             continue
             ;;
@@ -76,6 +85,8 @@ comm -23 \
         echo "DELETE $relpath"
     fi
 done
+
+rm -f /tmp/odoo-mcp-embedded-files /tmp/odoo-mcp-canonical-files
 
 if $DRY_RUN; then
     echo ""
