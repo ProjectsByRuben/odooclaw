@@ -1,5 +1,9 @@
 # CI: Verify the embedded odoo-mcp copy matches the canonical repo.
 # FAILS if any source file diverges or if files exist in only one side.
+#
+# Design: The embedded copy is the working development copy.
+# The canonical repo (nicolasramos/odooclaw-mcp) should be kept in sync
+# from it. This workflow checks that they match.
 
 name: "odoo-mcp sync check"
 
@@ -39,36 +43,33 @@ jobs:
         run: |
           EMBEDDED="odooclaw/workspace/skills/odoo-mcp"
           CANONICAL=".canonical-odoo-mcp"
-          DIFFS=""
+
+          # Build file lists — bound find to specific subdirectories
+          # Embedded: cd into the embedded dir, then find relative paths
+          (cd "$EMBEDDED" && find src tests requirements.txt -type f 2>/dev/null | sort) > /tmp/odoo-mcp-embedded-files
+          if [ -f "$EMBEDDED/README.md" ]; then
+            echo "README.md" >> /tmp/odoo-mcp-embedded-files
+          fi
+
+          # Canonical: cd into canonical, find relative paths
+          (cd "$CANONICAL" && find src tests requirements.txt -type f 2>/dev/null | sort) > /tmp/odoo-mcp-canonical-files
 
           # --- Shared files: check for content differences ---
-          comm -12 \
-            <(find "$EMBEDDED" src tests requirements.txt -type f 2>/dev/null | sed "s|^$EMBEDDED/||" | sort) \
-            <(cd "$CANONICAL" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||' | sort) \
-          | while read -r relpath; do
-              case "$relpath" in
-                README.md) continue ;;
-              esac
-              if [ -f "$EMBEDDED/$relpath" ] && [ -f "$CANONICAL/$relpath" ]; then
-                if ! diff -q "$EMBEDDED/$relpath" "$CANONICAL/$relpath" > /dev/null 2>&1; then
-                  echo "DIFFER: $relpath"
-                fi
+          comm -12 /tmp/odoo-mcp-embedded-files /tmp/odoo-mcp-canonical-files | while read -r relpath; do
+            if [ -f "$EMBEDDED/$relpath" ] && [ -f "$CANONICAL/$relpath" ]; then
+              if ! diff -q "$EMBEDDED/$relpath" "$CANONICAL/$relpath" > /dev/null 2>&1; then
+                echo "DIFFER: $relpath"
               fi
-            done > /tmp/odoo-mcp-shared-diffs
+            fi
+          done > /tmp/odoo-mcp-shared-diffs
 
-          # --- Embedded-only files ---
-          comm -23 \
-            <(find "$EMBEDDED" src tests requirements.txt -type f 2>/dev/null | sed "s|^$EMBEDDED/||" | sort) \
-            <(cd "$CANONICAL" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||' | sort) \
-          > /tmp/odoo-mcp-embedded-only
+          # --- Embedded-only files (not in canonical) ---
+          comm -23 /tmp/odoo-mcp-embedded-files /tmp/odoo-mcp-canonical-files > /tmp/odoo-mcp-embedded-only
 
-          # --- Canonical-only files ---
-          comm -13 \
-            <(find "$EMBEDDED" src tests requirements.txt -type f 2>/dev/null | sed "s|^$EMBEDDED/||" | sort) \
-            <(cd "$CANONICAL" && find src tests requirements.txt -type f 2>/dev/null | sed 's|^\./||' | sort) \
-          > /tmp/odoo-mcp-canonical-only
+          # --- Canonical-only files (not in embedded) ---
+          comm -13 /tmp/odoo-mcp-embedded-files /tmp/odoo-mcp-canonical-files > /tmp/odoo-mcp-canonical-only
 
-          # --- Report results ---
+          # --- Count and report ---
           SHARED_DIFF=$(wc -l < /tmp/odoo-mcp-shared-diffs | tr -d ' ')
           EMBEDDED_ONLY=$(wc -l < /tmp/odoo-mcp-embedded-only | tr -d ' ')
           CANONICAL_ONLY=$(wc -l < /tmp/odoo-mcp-canonical-only | tr -d ' ')
@@ -83,7 +84,7 @@ jobs:
           fi
 
           if [ "$EMBEDDED_ONLY" -gt 0 ]; then
-            echo "::error::Source files exist only in the embedded copy (should be in canonical):"
+            echo "::error::Source files exist only in the embedded copy:"
             cat /tmp/odoo-mcp-embedded-only | sed 's/^/  /'
           fi
 
@@ -94,7 +95,7 @@ jobs:
 
           TOTAL_ISSUES=$((SHARED_DIFF + EMBEDDED_ONLY + CANONICAL_ONLY))
           if [ "$TOTAL_ISSUES" -gt 0 ]; then
-            echo "::error::Embedded copy diverges from canonical. Run ./scripts/sync-odoo-mcp.sh to regenerate."
+            echo "::error::Copies diverge. Run ./scripts/sync-odoo-mcp.sh to regenerate."
             exit 1
           fi
 

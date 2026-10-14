@@ -2,17 +2,18 @@
 
 ## Canonical vs Derived Declaration
 
-**Canonical repo**: `https://github.com/nicolasramos/odooclaw-mcp`  
-**Derived copy**: `odooclaw/workspace/skills/odoo-mcp/` (embedded in `nicolasramos/odooclaw`)
+**Working copy (canonical source)**: `odooclaw/workspace/skills/odoo-mcp/` (embedded in `nicolasramos/odooclaw`)  
+**Derived repo**: `https://github.com/nicolasramos/odooclaw-mcp` (standalone package)
 
-The embedded copy is DERIVED. It MUST NOT be edited manually. All modifications
-to the tool server code are made in the canonical repo and propagated to the
-embedded copy via the sync script.
+The embedded copy is THE CANONICAL SOURCE. The separate repo is a DERIVATIVE
+that must be kept in sync from the embedded copy via the sync script.
+Do NOT edit the separate repo directly — always edit the embedded copy and run
+the sync script.
 
-## How to Regenerate the Derived Copy
+## How to Regenerate the Derived Repo
 
 ```bash
-# Clone the canonical repo (one-time)
+# Clone the canonical repo (one-time, if not already cloned)
 git clone https://github.com/nicolasramos/odooclaw-mcp.git /tmp/odooclaw-mcp
 
 # Run sync (from the odooclaw repo root)
@@ -22,7 +23,7 @@ git clone https://github.com/nicolasramos/odooclaw-mcp.git /tmp/odooclaw-mcp
 ./scripts/sync-odoo-mcp.sh --dry-run
 ```
 
-The script copies these paths from canonical → embedded:
+The script copies these paths from embedded → canonical:
 - `src/odoo_mcp/**` — all source code
 - `tests/**` — all tests
 - `requirements.txt` — dependencies
@@ -50,6 +51,6 @@ have no counterpart in the canonical repo.
 ## Divergence History
 
 As of 2026-10-13: 54 homonymous files, 0 identical. The solution declares
-the canonical repo as source of truth and derives the embedded copy.
+the embedded copy as source of truth and derives the separate repo.
 
-After sync: 82 homonymous files, 81 identical (README.md excluded by context).
+After sync: 67 homonymous files, 66 identical (README.md excluded by context).
