@@ -1,8 +1,7 @@
-import logging
 from datetime import date as date_cls
-from typing import Any
-
+from typing import Optional
 from odoo_mcp.core.client import OdooClient
+import logging
 
 _logger = logging.getLogger(__name__)
 
@@ -10,9 +9,9 @@ _logger = logging.getLogger(__name__)
 def _resolve_employee_id(
     client: OdooClient,
     sender_id: int,
-    employee_id: int | None = None,
-    user_id: int | None = None,
-) -> Any:
+    employee_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+) -> Optional[int]:
     if employee_id:
         return employee_id
 
@@ -32,12 +31,12 @@ def _resolve_employee_id(
 def find_attendance(
     client: OdooClient,
     sender_id: int,
-    user_id: int | None = None,
-    employee_id: int | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
+    user_id: Optional[int] = None,
+    employee_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     limit: int = 50,
-) -> Any:
+) -> list:
     if not client.model_exists("hr.attendance", sender_id=sender_id):
         raise ValueError("Model hr.attendance is not available in this Odoo instance")
 
@@ -81,12 +80,11 @@ def log_timesheet(
     project_id: int,
     name: str,
     unit_amount: float,
-    date: str | None,
-    task_id: int | None = None,
-    employee_id: int | None = None,
-) -> Any:
+    date: str,
+    task_id: Optional[int] = None,
+    employee_id: Optional[int] = None,
+) -> int:
     """Log a new timesheet entry."""
-    date = date or date_cls.today().isoformat()
     vals = {
         "project_id": project_id,
         "name": name,
@@ -115,13 +113,15 @@ def log_task_timesheet(
     task_id: int,
     name: str,
     unit_amount: float,
-    date: str | None = None,
-    employee_id: int | None = None,
-) -> Any:
+    date: Optional[str] = None,
+    employee_id: Optional[int] = None,
+) -> int:
     if not client.model_exists("project.task", sender_id=sender_id):
         raise ValueError("Model project.task is not available in this Odoo instance")
     if not client.model_exists("account.analytic.line", sender_id=sender_id):
-        raise ValueError("Model account.analytic.line is not available in this Odoo instance")
+        raise ValueError(
+            "Model account.analytic.line is not available in this Odoo instance"
+        )
 
     tasks = client.call_kw(
         "project.task",
@@ -146,7 +146,9 @@ def log_task_timesheet(
         "date": date or date_cls.today().isoformat(),
     }
 
-    resolved_employee_id = _resolve_employee_id(client, sender_id, employee_id=employee_id)
+    resolved_employee_id = _resolve_employee_id(
+        client, sender_id, employee_id=employee_id
+    )
     if resolved_employee_id:
         vals["employee_id"] = resolved_employee_id
 

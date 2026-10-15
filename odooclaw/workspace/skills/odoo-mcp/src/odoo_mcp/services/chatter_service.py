@@ -1,5 +1,3 @@
-from typing import Any
-
 from odoo_mcp.core.client import OdooClient
 from odoo_mcp.observability.logging import get_logger
 from odoo_mcp.services.capability_service import (
@@ -16,10 +14,10 @@ def create_activity(
     model: str,
     res_id: int,
     summary: str,
-    note: str | None = None,
-    assign_to: int | None = None,
-    date_deadline: str | None = None,
-) -> Any:
+    note: str = None,
+    assign_to: int = None,
+    date_deadline: str = None,
+) -> int:
     values = {
         "res_model": model,
         "res_id": res_id,
@@ -48,9 +46,9 @@ def create_activity(
 
 
 def list_pending_activities(
-    client: OdooClient, user_id: int, model: str | None = None, assign_to: int | None = None
-) -> Any:
-    domain: list[Any] = []
+    client: OdooClient, user_id: int, model: str = None, assign_to: int = None
+) -> list:
+    domain = []
     if model:
         domain.append(("res_model", "=", model))
     if assign_to:
@@ -77,7 +75,7 @@ def list_pending_activities(
 
 
 def mark_activity_done(
-    client: OdooClient, user_id: int, activity_id: int, feedback: str | None = None
+    client: OdooClient, user_id: int, activity_id: int, feedback: str = None
 ) -> bool:
     _logger.info(f"Marking activity {activity_id} as done")
     kwargs = {}
@@ -96,7 +94,7 @@ def mark_activity_done(
 
 def post_chatter_message(
     client: OdooClient, user_id: int, model: str, res_id: int, body: str
-) -> Any:
+) -> int:
     _logger.info(f"Posting chatter message on {model} id {res_id}")
     return client.call_kw(
         model,
@@ -113,8 +111,8 @@ def create_activity_summary(
     model: str,
     res_id: int,
     summary: str,
-    note: str | None = None,
-    assign_to: int | None = None,
+    note: str = None,
+    assign_to: int = None,
 ) -> dict:
     if not client.model_exists("mail.activity", sender_id=user_id):
         return build_unsupported_response(
@@ -123,7 +121,9 @@ def create_activity_summary(
             ["mail.activity"],
         )
 
-    activity_id = create_activity(client, user_id, model, res_id, summary, note, assign_to)
+    activity_id = create_activity(
+        client, user_id, model, res_id, summary, note, assign_to
+    )
     activity = client.call_kw(
         "mail.activity",
         "read",
@@ -148,7 +148,7 @@ def create_activity_summary(
 
 
 def close_activity_with_reason(
-    client: OdooClient, user_id: int, activity_id: int, reason: str | None = None
+    client: OdooClient, user_id: int, activity_id: int, reason: str = None
 ) -> dict:
     if not client.model_exists("mail.activity", sender_id=user_id):
         return build_unsupported_response(
