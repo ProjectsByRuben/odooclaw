@@ -7,8 +7,8 @@ del producto: no los sustituyas con este documento de organización del desarrol
 
 ## Carpeta de trabajo
 
-- Trabajo actual: `/home/rubenfernandez/CMP/doodba-cmp/odoo/custom/worktrees/odooclaw-app-operarios/.docker/odooclaw-source`.
-- Rama de tarea: `feature/odooclaw-app-operarios`.
+- Trabajo actual: `/home/rubenfernandez/CMP/doodba-cmp/odoo/custom/worktrees/odooclaw/desarrollo/.docker/odooclaw-source`.
+- Rama de tarea: `feature/desarrollo`.
 - Base original: `/home/rubenfernandez/CMP/doodba-cmp/.docker/odooclaw-source`, rama
   `cmp/odooclaw-estable-20261016`. La instalación utiliza esa carpeta y sus montajes.
 
