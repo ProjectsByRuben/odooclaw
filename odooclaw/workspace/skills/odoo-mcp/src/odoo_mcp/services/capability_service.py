@@ -44,7 +44,11 @@ def get_capabilities(client: OdooClient, user_id: int) -> dict:
     account_bank_line = probe("account.bank.statement.line")
     account_tax = probe("account.tax")
 
+    identity = client.call_kw("mail.thread", "odooclaw_session_info", sender_id=user_id)
     return {
+        "identity": identity["user"],
+        "permissions": identity["model_permissions"],
+        "record_rules": identity["record_rules"],
         "helpdesk": {
             "available": helpdesk_ticket["available"],
             "model": "helpdesk.ticket",

@@ -19,12 +19,14 @@ def _get_model_fields(client: OdooClient, model: str, sender_id: int) -> set:
     Results are cached per model with a short TTL to avoid hammering
     ir.model.fields on every read/search_read call.
     """
-    now = _field_cache_timestamps.get(model, 0.0)
-    if model in _field_cache and (now - _field_cache_timestamps[model]) < _FIELD_CACHE_TTL_SECONDS:
-        return _field_cache[model]
+    import time
+    key = (id(client), sender_id, model)
+    now = time.monotonic()
+    if key in _field_cache and (now - _field_cache_timestamps[key]) < _FIELD_CACHE_TTL_SECONDS:
+        return _field_cache[key]
 
     try:
-        fields_info = client.call_kw(model, "fields_get", sender_id=sender_id)
+        fields_info = client.call_kw(model, "fields_get", kwargs={"attributes": []}, sender_id=sender_id)
         if isinstance(fields_info, dict):
             result = set(fields_info.keys())
         else:
@@ -32,11 +34,11 @@ def _get_model_fields(client: OdooClient, model: str, sender_id: int) -> set:
     except Exception:
         result = set()
 
-    _field_cache[model] = result
-    _field_cache_timestamps[model] = now if now else 0.0
+    _field_cache[key] = result
+    _field_cache_timestamps[key] = now if now else 0.0
     # Store current time properly
     import time
-    _field_cache_timestamps[model] = time.monotonic()
+    _field_cache_timestamps[key] = time.monotonic()
     return result
 
 

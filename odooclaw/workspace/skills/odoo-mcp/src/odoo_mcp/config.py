@@ -7,6 +7,11 @@ MAX_SEARCH_LIMIT = int(os.environ.get("ODOO_MCP_MAX_LIMIT", 80))
 
 # Security Configuration Defaults
 DEFAULT_ALLOWED_MODELS: Set[str] = {
+    "res.users", "res.groups", "ir.model.access", "ir.rule", "res.config.settings", "ir.attachment",
+    "account.payment.term", "account.incoterms", "res.currency", "res.country",
+    "res.country.state", "uom.uom", "uom.category", "product.pricelist", "account.tax",
+    "mrp.production", "mrp.workorder", "mrp.bom", "mrp.bom.line",
+    "mrp.routing.workcenter", "quality.alert", "quality.check",
     # Core business models
     "res.partner",
     "res.partner.category",
@@ -94,65 +99,13 @@ DEFAULT_ALLOWED_MODELS: Set[str] = {
     "blog.tag",
 }
 
-# Models that are NEVER allowed, even via escape hatch
-# These are technical/security models that could expose system internals
-DEFAULT_DENIED_MODELS: Set[str] = {
-    # Model metadata
-    "ir.model",
-    "ir.model.fields",
-    "ir.model.data",
-    "ir.model.relation",
-    "ir.model.access",
-    # Views and menus
-    "ir.ui.view",
-    "ir.ui.menu",
-    # Module management
-    "ir.module.module",
-    "ir.module.category",
-    # Configuration (could expose credentials)
-    "ir.config_parameter",
-    "ir.actions.act_window",
-    "ir.actions.server",
-    "ir.actions.act_url",
-    "ir.actions.act_window.view",
-    # Users and security
-    "res.users",
-    "res.groups",
-    "res.lang",
-    # Base technical
-    "base.ir.actions.act_window",
-    # Credential / token / authentication models — NEVER allowed
-    # (NRA-466: critical security gap fill)
-    "res.users.apikeys",
-    "res.users.apikeys.show",
-    "res.users.log",
-    "res.users.deletion",
-    "res.device.log",
-    "auth_totp.device",
-    "auth.oauth.provider",
-    "auth.passkey.key",
-    "certificate.key",
-    # Cron / automation / logging — arbitrary execution risk
-    "ir.cron",
-    "ir.cron.trigger",
-    "ir.cron.progress",
-    "ir.actions.server.history",
-    "base.automation",
-    "ir.rule",
-    "ir.mail_server",
-    "fetchmail.server",
-    "ir.logging",
-    # Payment tokens — financial data
-    "payment.token",
-    # Privacy — GDPR-sensitive
-    "privacy.log",
-}
+# Delegated business and administration models use native Odoo permissions.
+# The bridge's own capabilities/configuration must never become tool data.
+DEFAULT_DENIED_MODELS: Set[str] = {"mail.odooclaw.reply.token", "ir.config_parameter"}
 
 DEFAULT_DENIED_FIELDS: Set[str] = {
-    "company_id",
     "create_uid",
     "create_date",
     "write_uid",
     "write_date",
-    "state",
 }

@@ -1,18 +1,12 @@
 from typing import Dict, Any, List, Optional
 from odoo_mcp.core.exceptions import OdooSecurityError
-from .policy import get_allowed_models, get_denied_write_fields, DEFAULT_DENIED_MODELS
+from .policy import get_denied_write_fields, DEFAULT_DENIED_MODELS
 
 def guard_model_access(model_name: str, client=None, sender_id: Optional[int] = None) -> None:
-    """Raises OdooSecurityError if the model is not authorized.
-    
-    Authorization check order:
-    1. Blacklist check (DEFAULT_DENIED_MODELS) - ALWAYS blocks
-    2. Allowlist check (get_allowed_models(client, sender_id)) - must be present
-    
-    Args:
-        model_name: The Odoo model name to check
-        client: Optional OdooClient for ir.config_parameter lookup
-        sender_id: Odoo user id used to read the escape-hatch config parameter
+    """Protect bridge-internal models; native Odoo checks authorize operations.
+
+    Model discovery visibility does not determine whether a user may operate on
+    a business record. Every call still requires the inbound user's capability.
     """
     # Blacklist always wins - even if model is in escape hatch
     if model_name in DEFAULT_DENIED_MODELS:
@@ -20,12 +14,12 @@ def guard_model_access(model_name: str, client=None, sender_id: Optional[int] = 
             f"Model '{model_name}' is not authorized (denied by security policy)."
         )
     
-    if model_name not in get_allowed_models(client, sender_id):
-        raise OdooSecurityError(
-            f"Model '{model_name}' is not authorized. "
-            f"Add it to 'odooclaw.extra_allowed_models' (ir.config_parameter) "
-            f"or ODOOCLAW_EXTRA_ALLOWED_MODELS to enable access."
-        )
+    # Schema visibility is not authorization: some users cannot list ir.model
+    # but can work on business models. The capability-bound RPC applies native
+    # model ACLs, record rules and field permissions for every actual operation.
+    if not isinstance(model_name, str) or not model_name.strip():
+        raise OdooSecurityError("Provide an installed Odoo model name.")
+
 
 def guard_write_fields(values: Dict[str, Any]) -> None:
     """Raises OdooSecurityError if attempting to write to a restricted field."""
@@ -35,10 +29,13 @@ def guard_write_fields(values: Dict[str, Any]) -> None:
             raise OdooSecurityError(f"Field '{field}' is restricted from direct write operations via MCP.")
 
 def guard_unlink(model_name: str) -> None:
-    """Denies completely all unlink operations."""
-    raise OdooSecurityError(f"Delete (unlink) operations are strictly forbidden via MCP. Model: {model_name}")
+    """Deletion is delegated to Odoo; protect only bridge-internal models."""
+    if model_name in DEFAULT_DENIED_MODELS:
+        raise OdooSecurityError(f"Model '{model_name}' is internal to the bridge.")
 
 def guard_action_name(method: str) -> None:
     """Ensures that invoked methods are safe workflow actions."""
-    if not (method.startswith("action_") or method.startswith("button_")):
-        raise OdooSecurityError("Only workflow actions (action_*, button_*) are permitted.")
+    if not isinstance(method, str) or not method or method.startswith("_") or method in {
+        "init", "sudo", "with_user", "with_env", "with_context", "with_company",
+    }:
+        raise OdooSecurityError("Private methods and environment impersonation are unavailable.")

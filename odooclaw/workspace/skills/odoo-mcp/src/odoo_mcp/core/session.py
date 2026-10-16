@@ -45,6 +45,11 @@ class OdooSession:
 
             _logger.debug(f"Authenticating against {auth_url} for user {self.username}")
             try:
+                # Select the database before authenticating a fresh Odoo session.
+                selected = self.session.get(
+                    f"{self.url}/web/login", params={"db": self.db}, timeout=10
+                )
+                selected.raise_for_status()
                 response = self.session.post(auth_url, json=payload, timeout=10)
                 response.raise_for_status()
                 result = response.json()

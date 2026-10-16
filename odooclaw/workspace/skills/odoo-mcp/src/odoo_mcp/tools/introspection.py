@@ -7,10 +7,15 @@ import logging
 _logger = logging.getLogger(__name__)
 
 
-def odoo_model_schema(client: OdooClient, user_id: int, model: str) -> str:
+def odoo_model_schema(client: OdooClient, user_id: int, model: str, field_names=None) -> str:
     """Retrieve and serialize fields schema for a given model."""
     try:
-        fields_info = client.call_kw(model, "fields_get", sender_id=user_id)
+        if field_names is not None and (not isinstance(field_names, list) or not 1 <= len(field_names) <= 50
+                                       or any(not isinstance(name, str) or not name for name in field_names)):
+            raise ValueError("field_names must contain 1-50 field names")
+        fields_info = client.call_kw(model, "fields_get", args=[field_names] if field_names else [],
+                                    kwargs={"attributes": ["type", "string", "required", "readonly", "relation", "selection"]},
+                                    sender_id=user_id)
         summary = {}
         for fname, fprops in fields_info.items():
             summary[fname] = {

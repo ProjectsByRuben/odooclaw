@@ -1,8 +1,12 @@
 import logging
+import os
 from typing import Any, Dict, List, Optional
 import requests
 from .session import OdooSession
 from .exceptions import OdooRPCError
+
+from contextvars import ContextVar
+request_capability = ContextVar("odooclaw_request_capability", default=None)
 
 _logger = logging.getLogger(__name__)
 
@@ -32,32 +36,13 @@ class OdooClient:
         """
         self._ensure_authenticated()
         args = args or []
-        kwargs = kwargs or {}
+        kwargs = dict(kwargs or {})
 
-        # If we have a specific user (sender_id) in the context, we must impersonate to respect security.
-        if sender_id:
-            return self._call_kw_as_user(sender_id, model, method, args, kwargs)
-
-        # Otherwise, standard call_kw (executed as the admin/bot user itself)
-        # Note: In a fully strict mode, you might force sender_id on all MCP endpoints.
-        endpoint = f"{self.odoo_session.url}/web/dataset/call_kw/{model}/{method}"
-
-        # Merge session context into kwargs (thread-safe read)
-        if "context" not in kwargs:
-            kwargs["context"] = self.odoo_session.get_context()
-
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "call",
-            "params": {
-                "model": model,
-                "method": method,
-                "args": args,
-                "kwargs": kwargs,
-            },
-        }
-
-        return self._do_post(endpoint, payload)
+        # Never fall back to the technical account for business operations.
+        if (type(sender_id) is not int or sender_id <= 1
+                or sender_id == self.odoo_session.get_uid()):
+            raise OdooRPCError("Permission denied: a valid authenticated Odoo user is required.")
+        return self._call_kw_as_user(sender_id, model, method, args, kwargs)
 
     def _call_kw_as_user(
         self,
@@ -72,11 +57,12 @@ class OdooClient:
 
         # Merge session context into kwargs (thread-safe read)
         context = kwargs.pop("context", {})
-        merged_context = self.odoo_session.get_context()
-        merged_context.update(context)
+        # The Odoo controller supplies the delegated user defaults.
+        merged_context = dict(context)
 
         payload = {
             "user_id": user_id,
+            "request_token": request_capability.get(),
             "model": model,
             "method": method,
             "args": args,
@@ -91,9 +77,24 @@ class OdooClient:
 
     def _do_post(self, endpoint: str, payload: dict) -> Any:
         try:
+            headers = {}
+            token = os.environ.get("ODOOCLAW_REPLY_TOKEN", "")
+            if token and endpoint == f"{self.odoo_session.url}/odooclaw/call_kw_as_user":
+                headers["X-OdooClaw-Token"] = token
+            # Administration and deletion can rebuild access/group caches and
+            # take substantially longer than ordinary reads on large databases.
+            long_operation = payload.get("method") == "unlink" or payload.get("model") in {"res.users", "res.groups", "ir.module.module"}
             response = self.odoo_session.session.post(
-                endpoint, json=payload, timeout=30
+                endpoint, json=payload, headers=headers, timeout=(10, 300 if long_operation else 60)
             )
+            if response.status_code == 403:
+                raise OdooRPCError(
+                    "Permission denied: the active Odoo user is not allowed to perform this operation."
+                )
+            if response.status_code == 422:
+                raise OdooRPCError("Odoo: " + response.json().get("reason", "Operation rejected by Odoo."))
+            if response.status_code >= 400:
+                raise OdooRPCError(f"Odoo rejected the operation (HTTP {response.status_code}); no success was confirmed.")
             response.raise_for_status()
             result = response.json()
 
@@ -120,7 +121,7 @@ class OdooClient:
             return True
 
         except requests.RequestException as e:
-            raise OdooRPCError(f"Network error during RPC call: {str(e)}")
+            raise OdooRPCError(f"Network error during RPC call: {str(e)}. The operation result is unknown; verify record state before retrying a mutation.")
 
     def try_call_kw(
         self,

@@ -21,7 +21,7 @@ def build_record_url(base_url: str, model: str, record_id: int) -> Optional[str]
     base = str(base_url).rstrip("/")
     if urlsplit(base).scheme.lower() not in ("http", "https"):
         return None
-    return f"{base}/web#id={record_id}&model={model}&view_type=form"
+    return f"/web#id={record_id}&model={model}&view_type=form"
 
 
 def serialize_records(
@@ -38,8 +38,10 @@ def serialize_records(
     for r in records:
         cleaned = {}
         for k, v in r.items():
-            # Example: clean up binary data or long html
-            if isinstance(v, str) and len(v) > 2000 and "html" in k.lower():
+            # Truncate binary data, large base64, or excessive HTML to protect LLM context
+            if isinstance(v, str) and len(v) > 500 and ("image" in k.lower() or "avatar" in k.lower() or k in ("datas", "db_datas")):
+                cleaned[k] = f"<binary data omitted: {len(v)} chars>"
+            elif isinstance(v, str) and len(v) > 2000 and "html" in k.lower():
                 cleaned[k] = f"<{len(v)} bytes of HTML content omitted>"
             else:
                 cleaned[k] = v
