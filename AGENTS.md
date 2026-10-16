@@ -5,17 +5,21 @@ proyecto Doodba y scripts/odooclaw/WORKTREES.rst. Los AGENTS.md bajo
 odooclaw/workspace y las plantillas de onboard forman parte de las instrucciones
 del producto: no los sustituyas con este documento de organización del desarrollo.
 
-## Carpeta de trabajo
+## Estado actual y carpeta estable
 
-- Trabajo actual: `/home/rubenfernandez/CMP/doodba-cmp/odoo/custom/worktrees/odooclaw/desarrollo/.docker/odooclaw-source`.
-- Rama de tarea: `feature/desarrollo`.
-- Base original: `/home/rubenfernandez/CMP/doodba-cmp/.docker/odooclaw-source`, rama
-  `cmp/odooclaw-estable-20261016`. La instalación utiliza esa carpeta y sus montajes.
+Repositorio: `/home/rubenfernandez/CMP/doodba-cmp/.docker/odooclaw-source`.
+Rama estable probada: `cmp/odooclaw-estable-20261016`. Todos los cambios propios
+anteriores están integrados aquí. No hay worktree ni rama de desarrollo activos.
+Rubén indicará con qué empezar: no crees ramas, worktrees ni funcionalidades ahora.
 
-Comprueba `git status --short`, `git branch --show-current` y `git worktree list`.
-Trabaja en el worktree de la tarea, no en la base. No muevas .git ni unifiques este
-Git con el del addon o el proyecto principal. El módulo Go está en el subdirectorio
-`odooclaw/`, no en la raíz de este repositorio.
+Antes de actuar, comprueba `git status --short`, `git branch --show-current` y
+`git worktree list`. Cuando haya una nueva tarea autorizada, prepara entonces el
+worktree correspondiente bajo odoo/custom/worktrees/odooclaw/<tema>. No muevas .git.
+El módulo Go está en `odooclaw/`, no en la raíz de este repositorio.
+
+`main` del autor contiene una actualización amplia posterior a la versión en uso.
+No la mezcles con la estable ni sustituyas el código sólo para unificar nombres.
+La reorganización actual no autoriza una actualización del producto upstream.
 
 ## Archivos principales
 
@@ -41,7 +45,7 @@ ni el selector de operario en una identidad administrativa de negocio.
 
 Conserva lectura de adjuntos, CRUD permitido, progreso y consumo al optimizar.
 La cuota del proveedor es compartida; el consumo por solicitud debe mantenerse
-separado entre peticiones concurrentes. La tarea actual es principalmente del
+separado entre peticiones concurrentes. La futura aplicación propia afectaría principalmente al
 addon/interfaz; no cambies proveedor, modelo, prompts ni límites sin motivo.
 
 ## Comprobaciones y configuración
