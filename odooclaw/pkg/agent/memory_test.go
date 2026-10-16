@@ -98,7 +98,7 @@ func TestMemoryStoreGetRelevantContextFallsBackToHistorical(t *testing.T) {
 	if _, err := store.historical.Save(corememory.HistoricalSaveInput{
 		Content: "Customer requested fiscal position reminder for next billing cycle.",
 		Source:  "memory_save",
-		Channel: "odoo",
+		Channel: "telegram",
 		ChatID:  "res.partner_42",
 		Metadata: map[string]string{
 			"company_id": "7",
@@ -111,7 +111,7 @@ func TestMemoryStoreGetRelevantContextFallsBackToHistorical(t *testing.T) {
 
 	context := store.GetRelevantContext(PromptMemoryOptions{
 		Query:   "fiscal position reminder",
-		Channel: "odoo",
+		Channel: "telegram",
 		ChatID:  "res.partner_42",
 		Metadata: map[string]string{
 			"company_id": "7",
@@ -130,7 +130,7 @@ func TestMemoryStoreGetRelevantContextFallsBackToHistorical(t *testing.T) {
 
 func TestMemoryStoreGetRelevantContextAugmentsHotWithHistorical(t *testing.T) {
 	tmpDir := setupWorkspace(t, map[string]string{
-		"memory/scopes/odoo/sender-18.md": "Customer 18 prefers concise deployment updates.",
+		"memory/scopes/telegram/sender-18.md": "Customer 18 prefers concise deployment updates.",
 	})
 	defer os.RemoveAll(tmpDir)
 
@@ -138,7 +138,7 @@ func TestMemoryStoreGetRelevantContextAugmentsHotWithHistorical(t *testing.T) {
 	if _, err := store.historical.Save(corememory.HistoricalSaveInput{
 		Content:  "Historical note: customer 18 requested monthly summary on deployments.",
 		Source:   "memory_save",
-		Channel:  "odoo",
+		Channel:  "telegram",
 		SenderID: "18",
 	}); err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func TestMemoryStoreGetRelevantContextAugmentsHotWithHistorical(t *testing.T) {
 
 	context := store.GetRelevantContext(PromptMemoryOptions{
 		Query:    "deployment updates summary",
-		Channel:  "odoo",
+		Channel:  "telegram",
 		SenderID: "18",
 	})
 

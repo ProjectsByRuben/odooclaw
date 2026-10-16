@@ -22,15 +22,15 @@ func odooLinkTestMessages(toolName, toolContent string) []providers.Message {
 	}
 }
 
-// Aceptación #1: find_pending_invoices → [INV/2026/0001](/odoo/account.move/42)
+// Aceptación #1: find_pending_invoices → [INV/2026/0001](/web#id=42&model=account.move&view_type=form)
 // con formato de puntos (nunca snake_case).
 func TestAddOdooRecordLinksInvoice(t *testing.T) {
 	messages := odooLinkTestMessages("mcp_odoo-mcp_odoo_find_pending_invoices",
 		`[{"id": 42, "name": "INV/2026/0001", "move_type": "out_invoice", "state": "posted"}]`)
 	got := addOdooRecordLinks(messages, "Tienes 1 factura pendiente.")
 
-	if !strings.Contains(got, "[INV/2026/0001](/odoo/account.move/42)") {
-		t.Fatalf("esperaba [INV/2026/0001](/odoo/account.move/42), got: %q", got)
+	if !strings.Contains(got, "[INV/2026/0001](/web#id=42&model=account.move&view_type=form)") {
+		t.Fatalf("esperaba [INV/2026/0001](/web#id=42&model=account.move&view_type=form), got: %q", got)
 	}
 	if strings.Contains(got, "account_move") {
 		t.Fatalf("URL snake_case no permitida: %q", got)
@@ -43,8 +43,8 @@ func TestAddOdooRecordLinksPartnerJSON(t *testing.T) {
 	messages := odooLinkTestMessages("odoo_find_partner", `[{"id": 10, "name": "Acme"}]`)
 	got := addOdooRecordLinks(messages, "Encontré a Acme.")
 
-	if !strings.Contains(got, "[Acme](/odoo/contacts/10)") {
-		t.Fatalf("esperaba [Acme](/odoo/contacts/10), got: %q", got)
+	if !strings.Contains(got, "[Acme](/web#id=10&model=res.partner&view_type=form)") {
+		t.Fatalf("esperaba [Acme](/web#id=10&model=res.partner&view_type=form), got: %q", got)
 	}
 	if strings.Contains(got, "res_partner") {
 		t.Fatalf("URL snake_case no permitida: %q", got)
@@ -57,8 +57,8 @@ func TestAddOdooRecordLinksPartnerSummary(t *testing.T) {
 		`{"id": 10, "name": "Acme SL", "email": "a@b.c"}`)
 	got := addOdooRecordLinks(messages, "Resumen del cliente:")
 
-	if !strings.Contains(got, "[Acme SL](/odoo/contacts/10)") {
-		t.Fatalf("esperaba [Acme SL](/odoo/contacts/10), got: %q", got)
+	if !strings.Contains(got, "[Acme SL](/web#id=10&model=res.partner&view_type=form)") {
+		t.Fatalf("esperaba [Acme SL](/web#id=10&model=res.partner&view_type=form), got: %q", got)
 	}
 }
 
@@ -68,8 +68,8 @@ func TestAddOdooRecordLinksProduct(t *testing.T) {
 		`[{"id": 5, "name": "Desk Oak", "default_code": "FURN-DESK"}]`)
 	got := addOdooRecordLinks(messages, "Producto encontrado:")
 
-	if !strings.Contains(got, "[Desk Oak](/odoo/product.product/5)") {
-		t.Fatalf("esperaba [Desk Oak](/odoo/product.product/5), got: %q", got)
+	if !strings.Contains(got, "[Desk Oak](/web#id=5&model=product.product&view_type=form)") {
+		t.Fatalf("esperaba [Desk Oak](/web#id=5&model=product.product&view_type=form), got: %q", got)
 	}
 	if strings.Contains(got, "product_product") {
 		t.Fatalf("URL snake_case no permitida: %q", got)
@@ -82,8 +82,8 @@ func TestAddOdooRecordLinksSaleOrder(t *testing.T) {
 		`[{"id": 100, "name": "SO/2026/0050", "state": "sale"}]`)
 	got := addOdooRecordLinks(messages, "Pedido encontrado:")
 
-	if !strings.Contains(got, "[SO/2026/0050](/odoo/sale.order/100)") {
-		t.Fatalf("esperaba [SO/2026/0050](/odoo/sale.order/100), got: %q", got)
+	if !strings.Contains(got, "[SO/2026/0050](/web#id=100&model=sale.order&view_type=form)") {
+		t.Fatalf("esperaba [SO/2026/0050](/web#id=100&model=sale.order&view_type=form), got: %q", got)
 	}
 	if strings.Contains(got, "sale_order") {
 		t.Fatalf("URL snake_case no permitida: %q", got)
@@ -107,7 +107,7 @@ func TestAddOdooRecordLinksDedupe(t *testing.T) {
 		`[{"id": 42, "name": "INV/2026/0001"}, {"id": 42, "name": "INV/2026/0001"}]`)
 	got := addOdooRecordLinks(messages, "Resultados:")
 
-	if strings.Count(got, "/odoo/account.move/42") != 1 {
+	if strings.Count(got, "/web#id=42&model=account.move&view_type=form") != 1 {
 		t.Fatalf("enlace duplicado: %q", got)
 	}
 }
@@ -115,33 +115,33 @@ func TestAddOdooRecordLinksDedupe(t *testing.T) {
 // Aceptación #3: una URL /odoo/<modelo>/<id> desnuda en la respuesta final
 // del modelo se convierte a markdown clicable.
 func TestConvertPlainURLsToLinks(t *testing.T) {
-	content := "La factura está en URL: /odoo/account.move/42"
+	content := "La factura está en URL: /web#id=42&model=account.move&view_type=form"
 	got := convertPlainURLsToLinks(content, nil)
 
-	if !strings.Contains(got, "[Factura 42](/odoo/account.move/42)") {
-		t.Fatalf("esperaba [Factura 42](/odoo/account.move/42), got: %q", got)
+	if !strings.Contains(got, "[Factura 42](/web#id=42&model=account.move&view_type=form)") {
+		t.Fatalf("esperaba [Factura 42](/web#id=42&model=account.move&view_type=form), got: %q", got)
 	}
 }
 
 // La conversión respeta el caso especial res.partner → contacts.
 func TestConvertPlainURLsToLinksPartner(t *testing.T) {
-	content := "El cliente está en URL: /odoo/contacts/10"
+	content := "El cliente está en URL: /web#id=10&model=res.partner&view_type=form"
 	got := convertPlainURLsToLinks(content, nil)
 
-	if !strings.Contains(got, "[Cliente 10](/odoo/contacts/10)") {
-		t.Fatalf("esperaba [Cliente 10](/odoo/contacts/10), got: %q", got)
+	if !strings.Contains(got, "[Cliente 10](/web#id=10&model=res.partner&view_type=form)") {
+		t.Fatalf("esperaba [Cliente 10](/web#id=10&model=res.partner&view_type=form), got: %q", got)
 	}
 }
 
 // Un URL que ya es target de un enlace markdown NO se toca ni se duplica.
 func TestConvertPlainURLsToLinksSkipsLinked(t *testing.T) {
-	content := "Mira [aquí](/odoo/account.move/42) por favor"
+	content := "Mira [aquí](/web#id=42&model=account.move&view_type=form) por favor"
 	got := convertPlainURLsToLinks(content, nil)
 
-	if strings.Count(got, "/odoo/account.move/42") != 1 {
+	if strings.Count(got, "/web#id=42&model=account.move&view_type=form") != 1 {
 		t.Fatalf("no debe duplicar enlaces: %q", got)
 	}
-	if !strings.Contains(got, "[aquí](/odoo/account.move/42)") {
+	if !strings.Contains(got, "[aquí](/web#id=42&model=account.move&view_type=form)") {
 		t.Fatalf("el enlace existente se alteró: %q", got)
 	}
 }
@@ -149,14 +149,14 @@ func TestConvertPlainURLsToLinksSkipsLinked(t *testing.T) {
 // La conversión usa el label REAL del tool result del turno cuando la URL
 // coincide (nunca duplica el enlace con dos labels distintos).
 func TestConvertPlainURLsToLinksKnownLabel(t *testing.T) {
-	content := "La factura está en URL: /odoo/account.move/42"
-	known := map[string]string{"/odoo/account.move/42": "INV/2026/0001"}
+	content := "La factura está en URL: /web#id=42&model=account.move&view_type=form"
+	known := map[string]string{"/web#id=42&model=account.move&view_type=form": "INV/2026/0001"}
 	got := convertPlainURLsToLinks(content, known)
 
-	if !strings.Contains(got, "[INV/2026/0001](/odoo/account.move/42)") {
+	if !strings.Contains(got, "[INV/2026/0001](/web#id=42&model=account.move&view_type=form)") {
 		t.Fatalf("label real no usado: %q", got)
 	}
-	if strings.Count(got, "/odoo/account.move/42") != 1 {
+	if strings.Count(got, "/web#id=42&model=account.move&view_type=form") != 1 {
 		t.Fatalf("enlace duplicado: %q", got)
 	}
 }
@@ -166,13 +166,13 @@ func TestConvertPlainURLsToLinksKnownLabel(t *testing.T) {
 func TestAddOdooRecordLinksPlainTextModelURL(t *testing.T) {
 	messages := odooLinkTestMessages("odoo_find_pending_invoices",
 		`[{"id": 42, "name": "INV/2026/0001"}]`)
-	content := "La factura está en URL: /odoo/account.move/42"
+	content := "La factura está en URL: /web#id=42&model=account.move&view_type=form"
 	got := addOdooRecordLinks(messages, content)
 
-	if !strings.Contains(got, "[INV/2026/0001](/odoo/account.move/42)") {
+	if !strings.Contains(got, "[INV/2026/0001](/web#id=42&model=account.move&view_type=form)") {
 		t.Fatalf("la URL desnuda no se convirtió con label real: %q", got)
 	}
-	if strings.Count(got, "/odoo/account.move/42") != 1 {
+	if strings.Count(got, "/web#id=42&model=account.move&view_type=form") != 1 {
 		t.Fatalf("enlace duplicado (tool result + conversión): %q", got)
 	}
 }
@@ -193,7 +193,7 @@ func TestAddOdooRecordLinksGenericSearch(t *testing.T) {
 
 	got := addOdooRecordLinks(messages, "Encontré el pedido SO/2026/0001.")
 
-	if !strings.Contains(got, "[SO/2026/0001](/odoo/sale.order/3)") {
+	if !strings.Contains(got, "[SO/2026/0001](/web#id=3&model=sale.order&view_type=form)") {
 		t.Fatalf("modelo de args no usado en odoo_search. got: %q", got)
 	}
 }
@@ -205,10 +205,10 @@ func TestAddOdooRecordLinksFindProductWrapper(t *testing.T) {
 		`{"ok": true, "status": "ok", "capability": "inventory.find_product", "count": 2, "products": [{"id": 7, "display_name": "Portatil HP", "default_code": "HP-X1"}, {"id": 8, "name": "Monitor LG"}]}`)
 	got := addOdooRecordLinks(messages, "He encontrado 2 productos.")
 
-	if !strings.Contains(got, "[Portatil HP](/odoo/product.product/7)") {
+	if !strings.Contains(got, "[Portatil HP](/web#id=7&model=product.product&view_type=form)") {
 		t.Fatalf("wrapper products no parseado (1): %q", got)
 	}
-	if !strings.Contains(got, "[Monitor LG](/odoo/product.product/8)") {
+	if !strings.Contains(got, "[Monitor LG](/web#id=8&model=product.product&view_type=form)") {
 		t.Fatalf("wrapper products no parseado (2): %q", got)
 	}
 }
@@ -229,10 +229,10 @@ func TestNormalizeToolName(t *testing.T) {
 
 // odooRecordURL: res.partner → contacts, resto con puntos.
 func TestOdooRecordURL(t *testing.T) {
-	if got := odooRecordURL("res.partner", 10); got != "/odoo/contacts/10" {
-		t.Errorf("res.partner → %q, want /odoo/contacts/10", got)
+	if got := odooRecordURL("res.partner", 10); got != "/web#id=10&model=res.partner&view_type=form" {
+		t.Errorf("res.partner → %q, want /web#id=10&model=res.partner&view_type=form", got)
 	}
-	if got := odooRecordURL("account.move", 42); got != "/odoo/account.move/42" {
-		t.Errorf("account.move → %q, want /odoo/account.move/42", got)
+	if got := odooRecordURL("account.move", 42); got != "/web#id=42&model=account.move&view_type=form" {
+		t.Errorf("account.move → %q, want /web#id=42&model=account.move&view_type=form", got)
 	}
 }

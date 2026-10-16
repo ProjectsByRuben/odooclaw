@@ -33,14 +33,14 @@ func TestParseJSONLEvents_AgentMessage(t *testing.T) {
 	if resp.Usage == nil {
 		t.Fatal("Usage should not be nil")
 	}
-	if resp.Usage.PromptTokens != 150 {
-		t.Errorf("PromptTokens = %d, want 150", resp.Usage.PromptTokens)
+	if resp.Usage.PromptTokens != 100 {
+		t.Errorf("PromptTokens = %d, want 100", resp.Usage.PromptTokens)
 	}
 	if resp.Usage.CompletionTokens != 20 {
 		t.Errorf("CompletionTokens = %d, want 20", resp.Usage.CompletionTokens)
 	}
-	if resp.Usage.TotalTokens != 170 {
-		t.Errorf("TotalTokens = %d, want 170", resp.Usage.TotalTokens)
+	if resp.Usage.TotalTokens != 120 {
+		t.Errorf("TotalTokens = %d, want 120", resp.Usage.TotalTokens)
 	}
 	if len(resp.ToolCalls) != 0 {
 		t.Errorf("ToolCalls should be empty, got %d", len(resp.ToolCalls))
@@ -405,7 +405,7 @@ func TestBuildPrompt_ToolResults(t *testing.T) {
 	if !strings.Contains(prompt, "[Tool Result for call_1]") {
 		t.Error("prompt should contain tool result")
 	}
-	if !strings.Contains(prompt, `{"temp": 72}`) {
+	if !strings.Contains(prompt, `{"temp":72}`) {
 		t.Error("prompt should contain tool result content")
 	}
 }
@@ -496,8 +496,8 @@ func TestCodexCliProvider_MockCLI_Success(t *testing.T) {
 	if resp.Usage == nil {
 		t.Fatal("Usage should not be nil")
 	}
-	if resp.Usage.PromptTokens != 60 {
-		t.Errorf("PromptTokens = %d, want 60", resp.Usage.PromptTokens)
+	if resp.Usage.PromptTokens != 50 {
+		t.Errorf("PromptTokens = %d, want 50", resp.Usage.PromptTokens)
 	}
 	if resp.Usage.CompletionTokens != 15 {
 		t.Errorf("CompletionTokens = %d, want 15", resp.Usage.CompletionTokens)
@@ -568,8 +568,8 @@ echo '{"type":"turn.completed"}'`
 	if !strings.Contains(args, "--json") {
 		t.Errorf("args should contain --json, got: %s", args)
 	}
-	if !strings.Contains(args, "--dangerously-bypass-approvals-and-sandbox") {
-		t.Errorf("args should contain bypass flag, got: %s", args)
+	if strings.Contains(args, "--dangerously-bypass-approvals-and-sandbox") || !strings.Contains(args, "--sandbox read-only") {
+		t.Errorf("args must retain the read-only sandbox, got: %s", args)
 	}
 }
 
@@ -638,5 +638,24 @@ func TestCodexCliProvider_Integration(t *testing.T) {
 	lower := strings.ToLower(strings.TrimSpace(resp.Content))
 	if !strings.Contains(lower, "hello") {
 		t.Errorf("Content = %q, expected to contain 'hello'", resp.Content)
+	}
+}
+
+func TestCodexCliPublicToolStatusDoesNotBecomeFinalContent(t *testing.T) {
+	p := NewCodexCliProvider("")
+	event, _ := json.Marshal(map[string]any{"type": "item.completed", "item": map[string]any{
+		"type": "agent_message", "text": `{"tool_calls":[{"id":"x","type":"function","function":{"name":"odoo_search","arguments":"{\"model\":\"res.partner\"}"}}],"status":"Voy a buscar tres contactos en Odoo."}`}})
+	resp, err := p.parseJSONLEvents(string(event))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != "Voy a buscar tres contactos en Odoo." || len(resp.ToolCalls) != 1 || resp.Content != "" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	// Internal reasoning items cannot supply a public progress update.
+	reasoning, _ := json.Marshal(map[string]any{"type": "item.completed", "item": map[string]any{"type": "reasoning", "text": `{"tool_calls":[],"status":"PRIVATE_REASONING"}`}})
+	resp, err = p.parseJSONLEvents(string(reasoning))
+	if err != nil || resp.Status != "" {
+		t.Fatalf("reasoning leaked: %+v %v", resp, err)
 	}
 }

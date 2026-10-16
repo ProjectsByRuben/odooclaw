@@ -687,3 +687,28 @@ func balanceJSONBraces(input string) (string, bool) {
 	}
 	return "", false
 }
+
+// extractToolStatus reads only the explicit public status from the tool envelope.
+// It never forwards reasoning items, command output or arbitrary response text.
+func extractToolStatus(text string) string {
+	start := strings.Index(text, `{"tool_calls"`)
+	if start < 0 {
+		return ""
+	}
+	end := findMatchingBrace(text, start)
+	if end <= start {
+		return ""
+	}
+	var envelope struct {
+		Status string `json:"status"`
+	}
+	if json.Unmarshal([]byte(text[start:end]), &envelope) != nil {
+		return ""
+	}
+	status := strings.Join(strings.Fields(envelope.Status), " ")
+	chars := []rune(status)
+	if len(chars) > 180 {
+		status = string(chars[:180])
+	}
+	return status
+}

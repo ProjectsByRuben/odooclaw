@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -37,7 +38,8 @@ func (p *CodexCliProvider) Chat(
 	args := []string{
 		"exec",
 		"--json",
-		"--dangerously-bypass-approvals-and-sandbox",
+		"--sandbox", "read-only",
+		"-c", `approval_policy="never"`,
 		"--skip-git-repo-check",
 		"--color", "never",
 	}
@@ -50,6 +52,13 @@ func (p *CodexCliProvider) Chat(
 	args = append(args, "-") // read prompt from stdin
 
 	cmd := exec.CommandContext(ctx, p.command, args...)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "ODOO_") || strings.HasPrefix(key, "ODOOCLAW_") {
+			continue
+		}
+		cmd.Env = append(cmd.Env, entry)
+	}
 	cmd.Stdin = bytes.NewReader([]byte(prompt))
 
 	var stdout, stderr bytes.Buffer
@@ -69,6 +78,14 @@ func (p *CodexCliProvider) Chat(
 	}
 
 	if err != nil {
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			var event map[string]any
+			if json.Unmarshal([]byte(line), &event) == nil && event["type"] == "error" {
+				if message, ok := event["message"].(string); ok && message != "" {
+					return nil, fmt.Errorf("codex cli error: %s", message)
+				}
+			}
+		}
 		if ctx.Err() == context.Canceled {
 			return nil, ctx.Err()
 		}
@@ -102,7 +119,7 @@ func (p *CodexCliProvider) buildPrompt(messages []Message, tools []ToolDefinitio
 			conversationParts = append(conversationParts, "Assistant: "+msg.Content)
 		case "tool":
 			conversationParts = append(conversationParts,
-				fmt.Sprintf("[Tool Result for %s]: %s", msg.ToolCallID, msg.Content))
+				fmt.Sprintf("[Tool Result for %s]: %s", msg.ToolCallID, compactToolJSON(msg.Content)))
 		}
 	}
 
@@ -183,11 +200,12 @@ func (p *CodexCliProvider) parseJSONLEvents(output string) (*LLMResponse, error)
 			}
 		case "turn.completed":
 			if event.Usage != nil {
-				promptTokens := event.Usage.InputTokens + event.Usage.CachedInputTokens
+				promptTokens := event.Usage.InputTokens
 				usage = &UsageInfo{
-					PromptTokens:     promptTokens,
-					CompletionTokens: event.Usage.OutputTokens,
-					TotalTokens:      promptTokens + event.Usage.OutputTokens,
+					PromptTokens:       promptTokens,
+					CachedPromptTokens: event.Usage.CachedInputTokens,
+					CompletionTokens:   event.Usage.OutputTokens,
+					TotalTokens:        promptTokens + event.Usage.OutputTokens,
 				}
 			}
 		case "error":
@@ -208,13 +226,16 @@ func (p *CodexCliProvider) parseJSONLEvents(output string) (*LLMResponse, error)
 	// Extract tool calls from response text (same pattern as ClaudeCliProvider)
 	toolCalls := extractToolCallsFromText(content)
 
+	status := ""
 	finishReason := "stop"
 	if len(toolCalls) > 0 {
+		status = extractToolStatus(content)
 		finishReason = "tool_calls"
 		content = stripToolCallsFromText(content)
 	}
 
 	return &LLMResponse{
+		Status:       status,
 		Content:      strings.TrimSpace(content),
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,

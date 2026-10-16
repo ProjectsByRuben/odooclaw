@@ -13,6 +13,7 @@ import (
 )
 
 type ToolRegistry struct {
+	executionMu     sync.Mutex // Protect mutable contextual tools across simultaneous users.
 	tools           map[string]Tool
 	mu              sync.RWMutex
 	retrievalEngine *RetrievalEngine
@@ -98,6 +99,15 @@ func (r *ToolRegistry) ExecuteWithContext(
 			})
 		return ErrorResult(fmt.Sprintf("tool %q not found", name)).WithError(fmt.Errorf("tool not found"))
 	}
+
+	if channel == "odoo" {
+		mcpTool, delegated := tool.(*MCPTool)
+		if !delegated || !mcpTool.RequiresOdooIdentity() {
+			return ErrorResult("Permission denied: Odoo chat only permits delegated Odoo tools.")
+		}
+	}
+	r.executionMu.Lock()
+	defer r.executionMu.Unlock()
 
 	// If tool implements MessageContextualTool, provide full message context
 	if msgCtxTool, ok := tool.(MessageContextualTool); ok && channel != "" && chatID != "" {

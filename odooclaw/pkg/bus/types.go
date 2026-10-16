@@ -29,10 +29,23 @@ type InboundMessage struct {
 	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
+// TokenUsage describes foreground model consumption for one request.
+// Cached input is a subset of InputTokens, never an additional charge here.
+type TokenUsage struct {
+	InputTokens       int  `json:"input_tokens"`
+	CachedInputTokens int  `json:"cached_input_tokens"`
+	OutputTokens      int  `json:"output_tokens"`
+	TotalTokens       int  `json:"total_tokens"`
+	ModelCalls        int  `json:"model_calls"`
+	Complete          bool `json:"complete"`
+}
+
 type OutboundMessage struct {
-	Channel string `json:"channel"`
-	ChatID  string `json:"chat_id"`
-	Content string `json:"content"`
+	TokenUsage *TokenUsage `json:"token_usage,omitempty"`
+	Progress   bool        `json:"progress,omitempty"`
+	Channel    string      `json:"channel"`
+	ChatID     string      `json:"chat_id"`
+	Content    string      `json:"content"`
 }
 
 // MediaPart describes a single media attachment to send.

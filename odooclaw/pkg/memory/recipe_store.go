@@ -20,18 +20,24 @@ type RecipeStore struct {
 	db *sql.DB
 }
 
+// DeleteConversation removes patterns belonging to exactly one chat and user.
+func (s *RecipeStore) DeleteConversation(channel, chatID, senderID string) error {
+	_, err := s.db.Exec(`DELETE FROM recipes WHERE channel = ? AND chat_id = ? AND sender_id = ?`, channel, chatID, senderID)
+	return err
+}
+
 // Recipe is a single resolved intent.
 type Recipe struct {
-	ID         int64     `json:"id"`
-	Query      string    `json:"query"`
-	Tool       string    `json:"tool"`
-	Arguments  string    `json:"arguments"`
-	Channel    string    `json:"channel"`
-	ChatID     string    `json:"chat_id"`
-	SenderID   string    `json:"sender_id"`
-	Success    bool      `json:"success"`
-	CreatedAt  time.Time `json:"created_at"`
-	UsedCount  int       `json:"used_count"`
+	ID         int64      `json:"id"`
+	Query      string     `json:"query"`
+	Tool       string     `json:"tool"`
+	Arguments  string     `json:"arguments"`
+	Channel    string     `json:"channel"`
+	ChatID     string     `json:"chat_id"`
+	SenderID   string     `json:"sender_id"`
+	Success    bool       `json:"success"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UsedCount  int        `json:"used_count"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 

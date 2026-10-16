@@ -135,10 +135,10 @@ func formatOCRResult(attachmentID int, raw string) string {
 		attachmentID,
 	)
 	if moveID > 0 {
-		summary += fmt.Sprintf("\n📄 Factura de proveedor: /odoo/account.move/%d", int(moveID))
+		summary += fmt.Sprintf("\n📄 Factura de proveedor: /web#id=%d&model=account.move&view_type=form", int(moveID))
 	}
 	if partnerID > 0 {
-		summary += fmt.Sprintf("\n👤 Proveedor: /odoo/contacts/%d", int(partnerID))
+		summary += fmt.Sprintf("\n👤 Proveedor: /web#id=%d&model=res.partner&view_type=form", int(partnerID))
 	}
 	if linked {
 		summary += "\n📎 Documento original adjuntado a la factura."

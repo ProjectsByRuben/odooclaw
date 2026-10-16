@@ -231,6 +231,11 @@ func (ms *MemoryStore) LongTermMemory() *corememory.LongTermStore {
 }
 
 func (ms *MemoryStore) GetRelevantContext(opts PromptMemoryOptions) string {
+	// Odoo uses only its own session history and fresh delegated records. Never
+	// recall global/fallback memories or recipes from another chat or sender.
+	if opts.Channel == "odoo" {
+		return ""
+	}
 	searchOpts := corememory.SearchOptions{
 		Query:    opts.Query,
 		Limit:    3,

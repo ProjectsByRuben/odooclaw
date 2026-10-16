@@ -25,6 +25,7 @@ type FunctionCall struct {
 }
 
 type LLMResponse struct {
+	Status           string            `json:"status,omitempty"`
 	Content          string            `json:"content"`
 	ReasoningContent string            `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall        `json:"tool_calls,omitempty"`
@@ -42,9 +43,10 @@ type ReasoningDetail struct {
 }
 
 type UsageInfo struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens       int `json:"prompt_tokens"`
+	CachedPromptTokens int `json:"cached_prompt_tokens,omitempty"`
+	CompletionTokens   int `json:"completion_tokens"`
+	TotalTokens        int `json:"total_tokens"`
 }
 
 // CacheControl marks a content block for LLM-side prefix caching.

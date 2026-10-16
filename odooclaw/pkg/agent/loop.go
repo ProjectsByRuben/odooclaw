@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -45,6 +46,7 @@ type AgentLoop struct {
 	state          *state.Manager
 	running        atomic.Bool
 	summarizing    sync.Map
+	sessionLocks   sync.Map
 	fallback       *providers.FallbackChain
 	channelManager *channels.Manager
 	mediaStore     media.MediaStore
@@ -349,6 +351,17 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 		al.wireOdooAllowlistCacheResetter(mcpManager)
 	}
 
+	// Bound simultaneous Odoo requests; tools remain serialized at the registry
+	// to preserve the authenticated sender during each delegated RPC.
+	limit := 4
+	if value, err := strconv.Atoi(os.Getenv("ODOOCLAW_ODOO_CONCURRENCY")); err == nil && value >= 1 && value <= 16 {
+		limit = value
+	}
+	slots := make(chan struct{}, limit)
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	logger.InfoCF("agent", "Odoo concurrent request capacity", map[string]any{"workers": limit})
+
 	for al.running.Load() {
 		select {
 		case <-ctx.Done():
@@ -359,8 +372,8 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				continue
 			}
 
-			// Process message
-			func() {
+			// Non-Odoo channels retain their existing sequential behavior.
+			process := func() {
 				// TODO: Re-enable media cleanup after inbound media is properly consumed by the agent.
 				// Currently disabled because files are deleted before the LLM can access their content.
 				// defer func() {
@@ -374,7 +387,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 				// 	}
 				// }()
 
-				response, err := al.processMessage(ctx, msg)
+				requestCtx := ctx
+				if msg.Channel == "odoo" {
+					requestCtx = withRequestUsage(ctx)
+				}
+				response, err := al.processMessage(requestCtx, msg)
 				if err != nil {
 					response = fmt.Sprintf("Error processing message: %v", err)
 				}
@@ -385,7 +402,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 					// Use default agent's tools to check (message tool is shared).
 					alreadySent := false
 					defaultAgent := al.registry.GetDefaultAgent()
-					if defaultAgent != nil {
+					if msg.Channel != "odoo" && defaultAgent != nil {
 						if tool, ok := defaultAgent.Tools.Get("message"); ok {
 							if mt, ok := tool.(*tools.MessageTool); ok {
 								alreadySent = mt.HasSentInRound()
@@ -395,9 +412,10 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 					if !alreadySent {
 						al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-							Channel: msg.Channel,
-							ChatID:  msg.ChatID,
-							Content: response,
+							Channel:    msg.Channel,
+							ChatID:     msg.ChatID,
+							Content:    response,
+							TokenUsage: usageSnapshot(requestCtx),
 						})
 						logger.InfoCF("agent", "Published outbound response",
 							map[string]any{
@@ -413,7 +431,22 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 						)
 					}
 				}
-			}()
+			}
+			if msg.Channel == "odoo" {
+				select {
+				case slots <- struct{}{}:
+				case <-ctx.Done():
+					return nil
+				}
+				workers.Add(1)
+				go func() {
+					defer workers.Done()
+					defer func() { <-slots }()
+					process()
+				}()
+			} else {
+				process()
+			}
 		}
 	}
 
@@ -460,6 +493,36 @@ func (al *AgentLoop) wireOdooAllowlistCacheResetter(mcpManager *mcp.Manager) {
 	ch, ok := al.channelManager.GetChannel("odoo")
 	if !ok {
 		return
+	}
+	if quotaChannel, ok := ch.(interface {
+		SetQuotaReader(func(context.Context) providers.ModelQuota)
+	}); ok {
+		if provider, ok := al.registry.GetDefaultAgent().Provider.(*providers.CodexCliProvider); ok {
+			quotaChannel.SetQuotaReader(provider.NewQuotaReader())
+		}
+	}
+	if deleter, ok := ch.(interface {
+		SetConversationDeleter(func(int, int, int) error)
+	}); ok {
+		deleter.SetConversationDeleter(func(uid, channelID, conversationID int) error {
+			peerID := strconv.Itoa(uid)
+			if conversationID > 0 {
+				peerID = fmt.Sprintf("%d:conversation:%d", uid, conversationID)
+			}
+			route := al.registry.ResolveRoute(routing.RouteInput{
+				Channel: "odoo", Peer: &routing.RoutePeer{Kind: "direct", ID: peerID},
+			})
+			agent, ok := al.registry.GetAgent(route.AgentID)
+			if !ok {
+				return fmt.Errorf("conversation agent not found")
+			}
+			if agent.ContextBuilder.memory.recipes != nil {
+				if err := agent.ContextBuilder.memory.recipes.DeleteConversation("odoo", fmt.Sprintf("mail.channel_%d", channelID), strconv.Itoa(uid)); err != nil {
+					return err
+				}
+			}
+			return agent.Sessions.Delete(route.SessionKey)
+		})
 	}
 	resetter, ok := ch.(channels.AllowlistCacheResetter)
 	if !ok {
@@ -643,7 +706,7 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	}
 
 	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
-	if tool, ok := agent.Tools.Get("message"); ok {
+	if tool, ok := agent.Tools.Get("message"); ok && msg.Channel != "odoo" {
 		if mt, ok := tool.(tools.ContextualTool); ok {
 			mt.SetContext(msg.Channel, msg.ChatID)
 		}
@@ -655,12 +718,25 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		sessionKey = msg.SessionKey
 	}
 
+	if msg.Channel == "odoo" {
+		lock, _ := al.sessionLocks.LoadOrStore(sessionKey, &sync.Mutex{})
+		lock.(*sync.Mutex).Lock()
+		defer lock.(*sync.Mutex).Unlock()
+	}
+
 	logger.InfoCF("agent", "Routed message",
 		map[string]any{
 			"agent_id":    agent.ID,
 			"session_key": sessionKey,
 			"matched_by":  route.MatchedBy,
 		})
+	if msg.Channel == "odoo" && al.channelManager != nil {
+		if channel, ok := al.channelManager.GetChannel("odoo"); ok {
+			if running, ok := channel.(interface{ MarkRequestRunning(string) }); ok {
+				running.MarkRequestRunning(msg.ChatID)
+			}
+		}
+	}
 
 	return al.runAgentLoop(ctx, agent, processOptions{
 		SessionKey:      sessionKey,
@@ -932,7 +1008,7 @@ func (al *AgentLoop) runAgentLoop(
 	// 0. Record last channel for heartbeat notifications (skip internal channels)
 	if opts.Channel != "" && opts.ChatID != "" {
 		// Don't record internal channels (cli, system, subagent)
-		if !constants.IsInternalChannel(opts.Channel) {
+		if opts.Channel != "odoo" && !constants.IsInternalChannel(opts.Channel) {
 			channelKey := fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID)
 			if err := al.RecordLastChannel(channelKey); err != nil {
 				logger.WarnCF(
@@ -945,7 +1021,9 @@ func (al *AgentLoop) runAgentLoop(
 	}
 
 	// 1. Update tool contexts
-	al.updateToolContexts(agent, opts.Channel, opts.ChatID)
+	if opts.Channel != "odoo" {
+		al.updateToolContexts(agent, opts.Channel, opts.ChatID)
+	}
 
 	// 2. Build messages (skip history for heartbeat)
 	var history []providers.Message
@@ -1003,7 +1081,7 @@ func (al *AgentLoop) runAgentLoop(
 	// 4. Multi-model pipeline pre-processing
 	// If the pipeline can handle this request directly (greeting, escalation),
 	// return the response immediately without calling the main LLM.
-	if al.pipeline != nil {
+	if al.pipeline != nil && opts.Channel != "odoo" {
 		// Convert history to multimodel.Message format for classifier context
 		var mmHistory []multimodel.Message
 		for _, msg := range history {
@@ -1057,7 +1135,13 @@ func (al *AgentLoop) runAgentLoop(
 	// 5. Run LLM iteration loop
 	finalContent, iteration, err := al.runLLMIteration(ctx, agent, messages, opts)
 	if err != nil {
-		return "", err
+		if opts.Channel != "odoo" {
+			return "", err
+		}
+		finalContent = "No he podido completar la solicitud. No puedo confirmar que se haya guardado ningún cambio; revisa los registros afectados antes de reintentarlo para evitar duplicados."
+		if strings.Contains(strings.ToLower(err.Error()), "out of credits") {
+			finalContent = "El proveedor de IA indica que tu workspace se ha quedado sin créditos. Hay que añadir créditos o esperar a que se restablezca la cuota antes de continuar. No puedo confirmar que la solicitud se haya completado."
+		}
 	}
 
 	// If last tool had ForUser content and we already sent it, we might not need to send final response
@@ -1080,9 +1164,10 @@ func (al *AgentLoop) runAgentLoop(
 	// 8. Optional: send response via bus
 	if opts.SendResponse {
 		al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-			Channel: opts.Channel,
-			ChatID:  opts.ChatID,
-			Content: finalContent,
+			Channel:    opts.Channel,
+			ChatID:     opts.ChatID,
+			Content:    finalContent,
+			TokenUsage: usageSnapshot(ctx),
 		})
 	}
 
@@ -1164,6 +1249,12 @@ func (al *AgentLoop) runLLMIteration(
 ) (string, int, error) {
 	iteration := 0
 	var finalContent string
+	var catalog *odooToolCatalog
+	if opts.Channel == "odoo" && os.Getenv("ODOOCLAW_ODOO_DEFER_TOOLS") == "true" {
+		if _, ok := agent.Provider.(*providers.CodexCliProvider); ok {
+			catalog = newOdooToolCatalog()
+		}
+	}
 
 	for iteration < agent.MaxIterations {
 		iteration++
@@ -1177,6 +1268,16 @@ func (al *AgentLoop) runLLMIteration(
 
 		// Build tool definitions
 		providerToolDefs := agent.Tools.ToProviderDefs()
+		if opts.Channel == "odoo" {
+			allowed := make([]providers.ToolDefinition, 0, len(providerToolDefs))
+			for _, definition := range providerToolDefs {
+				registered, _ := agent.Tools.Get(definition.Function.Name)
+				if delegated, ok := registered.(*tools.MCPTool); ok && delegated.RequiresOdooIdentity() {
+					allowed = append(allowed, definition)
+				}
+			}
+			providerToolDefs = allowed
+		}
 
 		// Tool retrieval: when the tool set exceeds the provider's limit,
 		// select only the top-K most relevant tools for the current user query.
@@ -1192,12 +1293,47 @@ func (al *AgentLoop) runLLMIteration(
 		if agent.MaxCloudToolsInPrompt != nil {
 			maxTools = *agent.MaxCloudToolsInPrompt
 		}
+		if opts.Channel == "odoo" {
+			// CLI tools are a text protocol, so all delegated tools can be exposed.
+			// Native API providers retain their provider-specific schema ceiling.
+			if _, cli := agent.Provider.(*providers.CodexCliProvider); cli {
+				maxTools = 0
+			}
+		}
 		if isLocal {
 			maxTools = maxLocalToolsInPrompt
 		}
 		if maxTools > 0 && len(providerToolDefs) > maxTools {
 			query := lastUserMessageText(messages)
-			providerToolDefs = retrieveRelevantTools(providerToolDefs, query, maxTools)
+			if opts.Channel == "odoo" {
+				coreNames := []string{"odoo_query_records", "odoo_filter_text", "odoo_sample_records", "odoo_batch_lookup", "odoo_current_user", "odoo_read", "odoo_search_read", "odoo_create", "odoo_write", "odoo_post_chatter_message", "odoo_invoke_action", "odoo_get_model_schema", "odoo_unlink", "odoo_execute", "odoo_read_attachment", "odoo_get_model_permissions"}
+				core := []providers.ToolDefinition{}
+				rest := []providers.ToolDefinition{}
+				for _, definition := range providerToolDefs {
+					essential := false
+					for _, name := range coreNames {
+						if definition.Function.Name == "mcp_odoo-manager_"+name || definition.Function.Name == "mcp_odoo-manager_"+strings.ReplaceAll(name, "-", "_") {
+							essential = true
+						}
+					}
+					if essential {
+						core = append(core, definition)
+					} else {
+						rest = append(rest, definition)
+					}
+				}
+				remaining := maxTools - len(core)
+				if remaining > 0 {
+					core = append(core, retrieveRelevantTools(rest, query, remaining)...)
+				}
+				providerToolDefs = core
+			} else {
+				providerToolDefs = retrieveRelevantTools(providerToolDefs, query, maxTools)
+			}
+		}
+
+		if catalog != nil {
+			providerToolDefs = catalog.definitions(providerToolDefs, messages)
 		}
 
 		// Log LLM request details
@@ -1221,6 +1357,14 @@ func (al *AgentLoop) runLLMIteration(
 				"tools_json":    formatToolsForLog(providerToolDefs),
 			})
 
+		if opts.Channel == "odoo" {
+			phase := "Analizando tu solicitud"
+			if iteration > 1 {
+				phase = "Revisando los resultados y preparando la respuesta"
+			}
+			al.bus.PublishOutbound(ctx, bus.OutboundMessage{Channel: opts.Channel, ChatID: opts.ChatID, Content: phase, Progress: true})
+		}
+
 		// Call LLM with fallback chain if candidates are configured.
 		var response *providers.LLMResponse
 		var err error
@@ -1231,8 +1375,8 @@ func (al *AgentLoop) runLLMIteration(
 					ctx,
 					agent.Candidates,
 					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-						return agent.Provider.Chat(
-							ctx,
+						return chatWithRequestUsage(
+							ctx, agent.Provider,
 							messages,
 							providerToolDefs,
 							model,
@@ -1282,7 +1426,7 @@ func (al *AgentLoop) runLLMIteration(
 			if useTextInjection {
 				opts["prompt_tools_in_text"] = true
 			}
-			return agent.Provider.Chat(ctx, messages, providerToolDefs, agent.Model, opts)
+			return chatWithRequestUsage(ctx, agent.Provider, messages, providerToolDefs, agent.Model, opts)
 		}
 
 		// Retry loop for context/token errors
@@ -1343,9 +1487,10 @@ func (al *AgentLoop) runLLMIteration(
 				}
 				if retry == 0 && !constants.IsInternalChannel(opts.Channel) {
 					al.bus.PublishOutbound(ctx, bus.OutboundMessage{
-						Channel: opts.Channel,
-						ChatID:  opts.ChatID,
-						Content: "Context window exceeded. Compressing history and retrying...",
+						Channel:  opts.Channel,
+						ChatID:   opts.ChatID,
+						Content:  "Estoy reduciendo el historial para poder continuar con la solicitud.",
+						Progress: opts.Channel == "odoo",
 					})
 				}
 
@@ -1368,6 +1513,10 @@ func (al *AgentLoop) runLLMIteration(
 					"error":     err.Error(),
 				})
 			return "", iteration, fmt.Errorf("LLM call failed after retries: %w", err)
+		}
+
+		if response.Usage != nil {
+			logger.InfoCF("agent", "LLM token usage", map[string]any{"channel": opts.Channel, "chat_id": opts.ChatID, "iteration": iteration, "input_tokens": response.Usage.PromptTokens, "cached_input_tokens": response.Usage.CachedPromptTokens, "output_tokens": response.Usage.CompletionTokens, "total_tokens": response.Usage.TotalTokens, "tools_in_prompt": len(providerToolDefs), "deferred_tools": catalog != nil})
 		}
 
 		go al.handleReasoning(
@@ -1482,21 +1631,47 @@ func (al *AgentLoop) runLLMIteration(
 				}
 			}
 
-			toolResult := agent.Tools.ExecuteWithContext(
-				ctx,
-				tc.Name,
-				tc.Arguments,
-				opts.Channel,
-				opts.ChatID,
-				opts.SenderID,
-				opts.Metadata,
-				asyncCallback,
-			)
+			if opts.Channel == "odoo" {
+				phase := odooToolActivity(tc, false, false)
+				if response.Status != "" {
+					phase = response.Status
+				}
+				al.bus.PublishOutbound(ctx, bus.OutboundMessage{Channel: opts.Channel, ChatID: opts.ChatID, Content: phase, Progress: true})
+			}
+
+			var toolResult *tools.ToolResult
+			if catalog != nil && tc.Name == odooDiscoverTool {
+				toolResult = catalog.discover(tc.Arguments)
+			} else {
+				toolResult = agent.Tools.ExecuteWithContext(
+					ctx,
+					tc.Name,
+					tc.Arguments,
+					opts.Channel,
+					opts.ChatID,
+					opts.SenderID,
+					opts.Metadata,
+					asyncCallback,
+				)
+			}
+
+			// Permission denials cannot be resolved by loading more schemas.
+			// Keep native authorization intact and avoid inflating subsequent prompts.
+			// Other failures retain the original complete-catalog diagnostic fallback.
+			// This never retries or repeats a mutation automatically.
+			if catalog != nil && tc.Name != odooDiscoverTool && toolResult.IsError && !isOdooPermissionDenial(toolResult) {
+				catalog.expandAll()
+			}
+
+			if opts.Channel == "odoo" {
+				phase := odooToolActivity(tc, true, toolResult.IsError)
+				al.bus.PublishOutbound(ctx, bus.OutboundMessage{Channel: opts.Channel, ChatID: opts.ChatID, Content: phase, Progress: true})
+			}
 
 			// Recipe memory: on SUCCESSFUL tool execution, store the
 			// resolved query → tool + args pattern for reuse as few-shot.
 			// Only successful executions are saved so the store stays clean.
-			if !toolResult.IsError && agent.ContextBuilder != nil && opts.UserMessage != "" {
+			if opts.Channel != "odoo" && !toolResult.IsError && agent.ContextBuilder != nil && opts.UserMessage != "" {
 				agent.ContextBuilder.SaveRecipe(opts.UserMessage, tc.Name, string(argsJSON), opts.Channel, opts.ChatID, opts.SenderID)
 				logger.DebugCF("agent", "recipe saved",
 					map[string]any{"tool": tc.Name, "query": opts.UserMessage})
@@ -1552,13 +1727,30 @@ func (al *AgentLoop) runLLMIteration(
 			messages = append(messages, toolResultMsg)
 
 			// RLM auto-capture: store large tool outputs to context lake
-			al.rlmAutoCapture(agent, tc.Name, contentForLLM)
+			if opts.Channel != "odoo" {
+				al.rlmAutoCapture(agent, tc.Name, contentForLLM)
+			}
 
 			// Save tool result message to session
 			agent.Sessions.AddFullMessage(opts.SessionKey, toolResultMsg)
 		}
+		// Metadata discovery must not reduce the existing business-step budget.
+		if catalog != nil && catalog.discoveries <= 4 {
+			onlyDiscovery := true
+			for _, call := range normalizedToolCalls {
+				if call.Name != odooDiscoverTool {
+					onlyDiscovery = false
+				}
+			}
+			if onlyDiscovery {
+				iteration--
+			}
+		}
 	}
 
+	if finalContent == "" && opts.Channel == "odoo" {
+		finalContent = "He alcanzado el límite de pasos antes de completar la consulta. Los resultados obtenidos son parciales y la solicitud no está resuelta. Puedes pedirme que continúe desde lo ya consultado."
+	}
 	return finalContent, iteration, nil
 }
 
@@ -1585,6 +1777,17 @@ func (al *AgentLoop) updateToolContexts(agent *AgentInstance, channel, chatID st
 // maybeSummarize triggers summarization if the session history exceeds thresholds.
 func (al *AgentLoop) maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) {
 	newHistory := agent.Sessions.GetHistory(sessionKey)
+	if channel == "odoo" {
+		if len(newHistory) > 20 {
+			compact, _, changed := compressedHistory(newHistory)
+			if changed {
+				agent.Sessions.SetHistory(sessionKey, compact)
+				agent.Sessions.Save(sessionKey)
+			}
+		}
+		return
+	}
+
 	tokenEstimate := al.estimateTokens(newHistory)
 	threshold := agent.ContextWindow * 75 / 100
 
@@ -1684,8 +1887,8 @@ func (al *AgentLoop) rlmAutoCapture(agent *AgentInstance, toolName, content stri
 
 	if result != nil && !result.IsError {
 		logger.DebugCF("agent", "RLM: auto-captured tool output", map[string]any{
-			"tool":    toolName,
-			"key":     key,
+			"tool":        toolName,
+			"key":         key,
 			"content_len": len(content),
 		})
 	}
@@ -1813,10 +2016,7 @@ func toolModelForName(name string) string {
 // records live under /odoo/contacts/{id}; every other model uses its real
 // dotted name (/odoo/account.move/42), matching the Odoo 17/18 web client.
 func odooRecordURL(model string, id int) string {
-	if model == "res.partner" {
-		return fmt.Sprintf("/odoo/contacts/%d", id)
-	}
-	return fmt.Sprintf("/odoo/%s/%d", model, id)
+	return fmt.Sprintf("/web#id=%d&model=%s&view_type=form", id, model)
 }
 
 // odooLinkLabel returns a human-readable fallback label for a record id when
@@ -1887,6 +2087,22 @@ type recordHit struct {
 // (matched through the assistant's ToolCalls by ToolCallID), never from the
 // model's own arguments.
 func addOdooRecordLinks(messages []providers.Message, content string) string {
+	content = strings.ReplaceAll(content, "http://odoo:8069", "")
+	content = odooPlainURLRe.ReplaceAllStringFunc(content, func(old string) string {
+		parts := strings.Split(strings.TrimPrefix(old, "/odoo/"), "/")
+		if len(parts) != 2 {
+			return old
+		}
+		model := parts[0]
+		if model == "contacts" {
+			model = "res.partner"
+		}
+		id, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return old
+		}
+		return odooRecordURL(model, id)
+	})
 	// Find the index of the LAST user message. Only tool results after it
 	// belong to the current turn.
 	start := 0
@@ -1953,6 +2169,9 @@ func addOdooRecordLinks(messages []providers.Message, content string) string {
 			model = modelFromArgs(call.args)
 		}
 		if model == "" {
+			continue
+		}
+		if strings.HasPrefix(model, "account.payment.term") || strings.HasPrefix(model, "uom.") || strings.HasPrefix(model, "ir.") || model == "account.incoterms" || model == "account.tax" || model == "res.currency" || model == "res.company" || model == "mail.channel" || model == "discuss.channel" {
 			continue
 		}
 
@@ -2084,7 +2303,7 @@ var odooPlainURLRe = regexp.MustCompile(`/odoo/[a-z][a-z0-9_.]*/\d+`)
 // untouched. knownLabels maps an /odoo/... URL to the real record name from
 // the current turn's tool results, used as the link label when available.
 func convertPlainURLsToLinks(content string, knownLabels map[string]string) string {
-	idxs := odooPlainURLRe.FindAllStringIndex(content, -1)
+	idxs := regexp.MustCompile(`/web#id=[0-9]+&model=[a-zA-Z0-9_.]+&view_type=form`).FindAllStringIndex(content, -1)
 	if len(idxs) == 0 {
 		return content
 	}
@@ -2113,6 +2332,15 @@ func convertPlainURLsToLinks(content string, knownLabels map[string]string) stri
 // /odoo/account.move/42, naming the entity by its model. The special
 // /odoo/contacts/{id} path is the res.partner web-client URL.
 func plainURLLabel(url string) string {
+	if strings.HasPrefix(url, "/web#id=") {
+		pieces := strings.Split(strings.TrimPrefix(url, "/web#id="), "&model=")
+		if len(pieces) == 2 {
+			id, err := strconv.Atoi(pieces[0])
+			if err == nil {
+				return odooLinkLabel(strings.Split(pieces[1], "&")[0], id)
+			}
+		}
+	}
 	parts := strings.Split(strings.TrimPrefix(url, "/odoo/"), "/")
 	if len(parts) != 2 {
 		return url
@@ -2292,6 +2520,9 @@ func (al *AgentLoop) handleCommand(ctx context.Context, msg bus.InboundMessage) 
 
 	cmd := parts[0]
 	args := parts[1:]
+	if msg.Channel == "odoo" && cmd == "/switch" {
+		return "La configuración del modelo es común a la empresa y no se puede cambiar desde un chat. Contacta con informática.", true
+	}
 
 	switch cmd {
 	case "/browser-pair":

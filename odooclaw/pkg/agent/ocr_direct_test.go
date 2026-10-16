@@ -4,10 +4,10 @@ import "testing"
 
 func TestFindInvoiceAttachment(t *testing.T) {
 	cases := []struct {
-		name     string
-		msg      string
-		wantID   int
-		wantOK   bool
+		name   string
+		msg    string
+		wantID int
+		wantOK bool
 	}{
 		{
 			name:   "plain marker",
@@ -60,10 +60,10 @@ func TestFormatOCRResult(t *testing.T) {
 	if out == "" {
 		t.Fatal("empty output for success payload")
 	}
-	if !contains(out, "/odoo/account.move/26") {
+	if !contains(out, "/web#id=26&model=account.move&view_type=form") {
 		t.Errorf("missing move link in: %s", out)
 	}
-	if !contains(out, "/odoo/contacts/45") {
+	if !contains(out, "/web#id=45&model=res.partner&view_type=form") {
 		t.Errorf("missing partner link in: %s", out)
 	}
 

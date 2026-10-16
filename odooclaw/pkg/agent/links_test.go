@@ -24,7 +24,7 @@ func TestAddOdooRecordLinksRealFlow(t *testing.T) {
 	content := "El partner **Acme Corporation** fue encontrado en el sistema."
 	got := addOdooRecordLinks(messages, content)
 
-	if !strings.Contains(got, "/odoo/contacts/10") {
+	if !strings.Contains(got, "/web#id=10&model=res.partner&view_type=form") {
 		t.Fatalf("enlace no añadido. got: %q", got)
 	}
 	if !strings.Contains(got, content) {
@@ -59,10 +59,10 @@ func TestAddOdooRecordLinksIgnoresPreviousTurns(t *testing.T) {
 	content := "El cliente **Pepito** se ha encontrado."
 	got := addOdooRecordLinks(messages, content)
 
-	if strings.Contains(got, "/odoo/contacts/10") {
+	if strings.Contains(got, "/web#id=10&model=res.partner&view_type=form") {
 		t.Fatalf("enlace del turno anterior (id 10) filtrado en el actual: %q", got)
 	}
-	if !strings.Contains(got, "/odoo/contacts/42") {
+	if !strings.Contains(got, "/web#id=42&model=res.partner&view_type=form") {
 		t.Fatalf("enlace del turno actual (id 42) no añadido: %q", got)
 	}
 }
@@ -95,9 +95,9 @@ func TestAddOdooRecordLinksNoDouble(t *testing.T) {
 		{Role: "user", Content: "Busca Acme"},
 		{Role: "tool", ToolCallID: "c", Content: "10"},
 	}
-	content := "El cliente es **Acme**. [Ver](/odoo/contacts/10)"
+	content := "El cliente es **Acme**. [Ver](/web#id=10&model=res.partner&view_type=form)"
 	got := addOdooRecordLinks(messages, content)
-	if strings.Count(got, "/odoo/contacts/10") != 1 {
+	if strings.Count(got, "/web#id=10&model=res.partner&view_type=form") != 1 {
 		t.Fatalf("enlace duplicado: %q", got)
 	}
 }

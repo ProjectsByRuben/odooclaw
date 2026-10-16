@@ -64,7 +64,7 @@ COPY --from=builder /src/build/odooclaw /usr/local/bin/odooclaw
 COPY workspace/skills/odoo-mcp/requirements.txt /tmp/odoo-mcp-reqs.txt
 RUN pip install --no-cache-dir -r /tmp/odoo-mcp-reqs.txt || true
 COPY workspace/skills/odoo-mcp/src /opt/odoo-mcp
-ENV PYTHONPATH="/opt/odoo-mcp:${PYTHONPATH}"
+ENV PYTHONPATH="/opt/odoo-mcp"
 
 # Copy Edge TTS MCP server script
 COPY workspace/skills/edge-tts/server.py /usr/local/bin/edge-tts-mcp.py

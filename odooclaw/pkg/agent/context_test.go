@@ -205,7 +205,7 @@ func TestSanitizeHistoryForProvider_PlainConversation(t *testing.T) {
 	assertRoles(t, result, "user", "assistant", "user", "assistant")
 }
 
-func TestBuildMessagesIncludesOdooScopedMemoryRecall(t *testing.T) {
+func TestBuildMessagesExcludesOdooAuxiliaryMemoryRecall(t *testing.T) {
 	tmpDir := setupWorkspace(t, map[string]string{
 		"memory/MEMORY.md": "# Memory\n\nGlobal context.",
 		"memory/scopes/odoo/company-7/entity-res.partner-42.md": "Partner 42 prefers Friday deployment updates.",
@@ -232,11 +232,11 @@ func TestBuildMessagesIncludesOdooScopedMemoryRecall(t *testing.T) {
 		t.Fatal("expected messages")
 	}
 	system := msgs[0].Content
-	if !strings.Contains(system, "## Relevant Memory Recall") {
-		t.Fatal("expected relevant memory recall in system prompt")
+	if strings.Contains(system, "## Relevant Memory Recall") {
+		t.Fatal("auxiliary memory was recalled in Odoo chat")
 	}
-	if !strings.Contains(system, "Partner 42 prefers Friday deployment updates") {
-		t.Fatal("expected scoped memory content in system prompt")
+	if strings.Contains(system, "Partner 42 prefers Friday deployment updates") || strings.Contains(system, "Global context.") {
+		t.Fatal("external memory content leaked into this conversation")
 	}
 	if !strings.Contains(system, "<!-- odoo.model: res.partner -->") {
 		t.Fatal("expected odoo model in dynamic context")
@@ -244,8 +244,8 @@ func TestBuildMessagesIncludesOdooScopedMemoryRecall(t *testing.T) {
 	if !strings.Contains(system, "<!-- odoo.company_id: 7 -->") {
 		t.Fatal("expected company id in dynamic context")
 	}
-	if !strings.Contains(system, filepath.Base("entity-res.partner-42.md")) {
-		t.Fatal("expected scoped file name in memory recall")
+	if strings.Contains(system, filepath.Base("entity-res.partner-42.md")) {
+		t.Fatal("auxiliary memory file included in conversation")
 	}
 }
 
@@ -461,9 +461,9 @@ func TestSlidingWindowByTokens_FitsWithinBudget(t *testing.T) {
 func TestSlidingWindowByTokens_DropsOldest(t *testing.T) {
 	// Create history that exceeds the budget
 	history := []providers.Message{
-		{Role: "user", Content: strings.Repeat("x", 200000)}, // ~50k tokens
+		{Role: "user", Content: strings.Repeat("x", 200000)},      // ~50k tokens
 		{Role: "assistant", Content: strings.Repeat("y", 200000)}, // ~50k tokens
-		{Role: "user", Content: "last"}, // ~1 token
+		{Role: "user", Content: "last"},                           // ~1 token
 	}
 	result := slidingWindowByTokens(history, 1000) // ~4000 chars budget
 	if len(result) == 0 {

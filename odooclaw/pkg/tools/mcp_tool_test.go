@@ -421,6 +421,7 @@ func TestMCPTool_Execute_InjectsOdooContextForManagerAliases(t *testing.T) {
 				"42",
 				map[string]string{
 					"company_id":          "7",
+					"request_token":       "test-capability",
 					"allowed_company_ids": "[7,8]",
 				},
 			)
@@ -461,6 +462,7 @@ func TestMCPTool_Execute_OverridesUntrustedOdooIdentityContext(t *testing.T) {
 		"42",
 		map[string]string{
 			"company_id":          "7",
+			"request_token":       "test-capability",
 			"allowed_company_ids": "[7,8]",
 		},
 	)
@@ -493,8 +495,8 @@ func TestMCPTool_Execute_RemovesUntrustedOdooIdentityOutsideOdooChannel(t *testi
 	mcpTool.SetMessageContext("slack", "channel-10", "external-user", nil)
 
 	result := mcpTool.Execute(context.Background(), map[string]any{"sender_id": 1})
-	if result == nil || result.IsError {
-		t.Fatalf("expected successful result, got %#v", result)
+	if result == nil || !result.IsError {
+		t.Fatalf("expected rejected identity, got %#v", result)
 	}
 }
 
@@ -516,8 +518,8 @@ func TestMCPTool_Execute_RemovesModelIdentityWhenOdooSenderIsInvalid(t *testing.
 	mcpTool.SetMessageContext("odoo", "discuss.channel_10", "invalid", nil)
 
 	result := mcpTool.Execute(context.Background(), map[string]any{"sender_id": 1})
-	if result == nil || result.IsError {
-		t.Fatalf("expected successful result, got %#v", result)
+	if result == nil || !result.IsError {
+		t.Fatalf("expected rejected identity, got %#v", result)
 	}
 }
 

@@ -154,6 +154,24 @@ func sanitizeFilename(key string) string {
 	return strings.ReplaceAll(key, ":", "_")
 }
 
+// Delete removes exactly one conversation from memory and persistent storage.
+// The channel ensures no request for this conversation is executing.
+func (sm *SessionManager) Delete(key string) error {
+	filename := sanitizeFilename(key)
+	if filename == "." || !filepath.IsLocal(filename) || strings.ContainsAny(filename, `/\\`) {
+		return os.ErrInvalid
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.storage != "" {
+		if err := os.Remove(filepath.Join(sm.storage, filename+".json")); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	delete(sm.sessions, key)
+	return nil
+}
+
 func (sm *SessionManager) Save(key string) error {
 	if sm.storage == "" {
 		return nil

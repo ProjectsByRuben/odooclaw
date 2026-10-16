@@ -19,10 +19,11 @@ func buildCLIToolsPrompt(tools []ToolDefinition) string {
 	sb.WriteString("When you need to use a tool, respond with ONLY a JSON object:\n\n")
 	sb.WriteString("```json\n")
 	sb.WriteString(
-		`{"tool_calls":[{"id":"call_xxx","type":"function","function":{"name":"tool_name","arguments":"{...}"}}]}`,
+		`{"tool_calls":[{"id":"call_xxx","type":"function","function":{"name":"tool_name","arguments":"{...}"}}],"status":"Voy a buscar los contactos solicitados."}`,
 	)
 	sb.WriteString("\n```\n\n")
 	sb.WriteString("CRITICAL: The 'arguments' field MUST be a JSON-encoded STRING.\n\n")
+	sb.WriteString("Keep tool_calls as the first JSON key. Include a status string: one short sentence in the user's language describing the concrete action you are about to perform, e.g. 'Voy a buscar tres contactos en Odoo.' This is a public progress update: no internal reasoning, raw tool names, credentials or claims of completed work. Only describe the tools in this response.\n\n")
 	sb.WriteString("### Tool Definitions:\n\n")
 
 	for _, tool := range tools {

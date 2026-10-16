@@ -141,6 +141,16 @@ func (t *MCPTool) Description() string {
 
 // Parameters returns the tool parameters schema
 func (t *MCPTool) Parameters() map[string]any {
+	original := t.parameters()
+	raw, _ := json.Marshal(original)
+	var exposed map[string]any
+	_ = json.Unmarshal(raw, &exposed)
+	if properties, ok := exposed["properties"].(map[string]any); ok {
+		delete(properties, "request_token")
+	}
+	return exposed
+}
+func (t *MCPTool) parameters() map[string]any {
 	// The InputSchema is already a JSON Schema object
 	schema := t.tool.InputSchema
 
@@ -201,11 +211,20 @@ func (t *MCPTool) Parameters() map[string]any {
 		}
 	}
 
+	if properties, ok := result["properties"].(map[string]any); ok {
+		delete(properties, "request_token")
+	}
 	return result
 }
 
 // Execute executes the MCP tool
 func (t *MCPTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+	if t.RequiresOdooIdentity() {
+		uid, valid := parseInt(t.senderID)
+		if t.channel != "odoo" || !valid || uid <= 1 || t.metadata["request_token"] == "" {
+			return ErrorResult("Permission denied: an authenticated Odoo user is required.")
+		}
+	}
 	callArgs := args
 	if len(args) > 0 {
 		callArgs = make(map[string]any, len(args))
@@ -214,7 +233,13 @@ func (t *MCPTool) Execute(ctx context.Context, args map[string]any) *ToolResult 
 		}
 	}
 
+	if callArgs == nil {
+		callArgs = make(map[string]any)
+	}
 	t.injectOdooContext(callArgs)
+	if t.RequiresOdooIdentity() {
+		callArgs["request_token"] = t.metadata["request_token"]
+	}
 
 	result, err := t.manager.CallTool(ctx, t.serverName, t.tool.Name, callArgs)
 	if err != nil {
@@ -235,11 +260,25 @@ func (t *MCPTool) Execute(ctx context.Context, args map[string]any) *ToolResult 
 
 	// Extract text content from result
 	output := extractContentText(result.Content)
+	if output == "" {
+		if result.StructuredContent != nil {
+			raw, _ := json.Marshal(result.StructuredContent)
+			output = string(raw)
+		}
+		if output == "" {
+			output = "null"
+		}
+	}
 
 	return &ToolResult{
 		ForLLM:  output,
 		IsError: false,
 	}
+}
+
+// RequiresOdooIdentity marks tools that must enforce the inbound user's permissions.
+func (t *MCPTool) RequiresOdooIdentity() bool {
+	return isOdooContextServer(t.serverName)
 }
 
 // SetMessageContext stores inbound message context for optional argument injection.
