@@ -8,13 +8,17 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // CodexCliProvider implements LLMProvider by wrapping the codex CLI as a subprocess.
 type CodexCliProvider struct {
-	command   string
-	workspace string
+	command       string
+	workspace     string
+	catalogOnce   sync.Once
+	catalogReader func(context.Context) ModelCatalog
 }
 
 // NewCodexCliProvider creates a new Codex CLI provider.
@@ -33,6 +37,13 @@ func (p *CodexCliProvider) Chat(
 		return nil, fmt.Errorf("codex command not configured")
 	}
 
+	selection, err := p.validateChatSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if selection.Model != "" {
+		model = selection.Model
+	}
 	prompt := p.buildPrompt(messages, tools)
 
 	args := []string{
@@ -45,6 +56,12 @@ func (p *CodexCliProvider) Chat(
 	}
 	if model != "" && model != "codex-cli" {
 		args = append(args, "-m", model)
+	}
+	if selection.ReasoningEffort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+strconv.Quote(selection.ReasoningEffort))
+	}
+	if selection.ServiceTier != "" {
+		args = append(args, "-c", "service_tier="+strconv.Quote(selection.ServiceTier))
 	}
 	if p.workspace != "" {
 		args = append(args, "-C", p.workspace)
@@ -65,7 +82,7 @@ func (p *CodexCliProvider) Chat(
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 
 	// Parse JSONL from stdout even if exit code is non-zero,
 	// because codex writes diagnostic noise to stderr (e.g. rollout errors)

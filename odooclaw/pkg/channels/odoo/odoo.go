@@ -41,6 +41,11 @@ type OdooChannel struct {
 	retiredConversations sync.Map
 	conversationDeleter  func(userID, channelID, conversationID int) error
 	quotaReader          func(context.Context) providers.ModelQuota
+	modelReader          func(context.Context) providers.ModelCatalog
+}
+
+func (c *OdooChannel) SetModelReader(fn func(context.Context) providers.ModelCatalog) {
+	c.modelReader = fn
 }
 
 func (c *OdooChannel) SetQuotaReader(fn func(context.Context) providers.ModelQuota) {
@@ -85,22 +90,23 @@ type ChatterMessage struct {
 }
 
 type OdooWebhookPayload struct {
-	MessageID         int              `json:"message_id"`
-	Model             string           `json:"model"`
-	ResID             int              `json:"res_id"`
-	ReplyModel        string           `json:"reply_model"`
-	ReplyResID        int              `json:"reply_res_id"`
-	AuthorID          int              `json:"author_id"`
-	AuthorUserID      int              `json:"author_user_id"`
-	AuthorName        string           `json:"author_name"`
-	SessionInfo       map[string]any   `json:"session_info,omitempty"`
-	Body              string           `json:"body"`
-	IsDM              bool             `json:"is_dm"`
-	ConversationID    int              `json:"conversation_id,omitempty"`
-	CompanyID         int              `json:"company_id"`
-	AllowedCompanyIDs []int            `json:"allowed_company_ids"`
-	ReplyToken        string           `json:"reply_token,omitempty"`
-	ChatterContext    []ChatterMessage `json:"chatter_context,omitempty"`
+	MessageID         int                         `json:"message_id"`
+	Model             string                      `json:"model"`
+	ResID             int                         `json:"res_id"`
+	ReplyModel        string                      `json:"reply_model"`
+	ReplyResID        int                         `json:"reply_res_id"`
+	AuthorID          int                         `json:"author_id"`
+	AuthorUserID      int                         `json:"author_user_id"`
+	AuthorName        string                      `json:"author_name"`
+	ModelSettings     providers.ChatModelSettings `json:"model_settings,omitempty"`
+	SessionInfo       map[string]any              `json:"session_info,omitempty"`
+	Body              string                      `json:"body"`
+	IsDM              bool                        `json:"is_dm"`
+	ConversationID    int                         `json:"conversation_id,omitempty"`
+	CompanyID         int                         `json:"company_id"`
+	AllowedCompanyIDs []int                       `json:"allowed_company_ids"`
+	ReplyToken        string                      `json:"reply_token,omitempty"`
+	ChatterContext    []ChatterMessage            `json:"chatter_context,omitempty"`
 }
 
 type OdooReplyPayload struct {
@@ -426,6 +432,9 @@ func (c *OdooChannel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"reply_model":  replyModel,
 		"reply_res_id": strconv.Itoa(replyResID),
 	}
+	if b, err := json.Marshal(payload.ModelSettings); err == nil {
+		metadata["model_settings"] = string(b)
+	}
 	metadata["sender_name"] = payload.AuthorName
 	if len(payload.SessionInfo) > 0 {
 		if b, err := json.Marshal(payload.SessionInfo); err == nil {
@@ -539,6 +548,18 @@ func (c *OdooChannel) serveSystemWebhook(w http.ResponseWriter, r *http.Request)
 	}
 
 	switch payload.Event {
+	case "model_catalog":
+		if c.config.WebhookToken == "" {
+			writeSystemError(w, http.StatusUnauthorized, "shared secret required")
+			return
+		}
+		catalog := providers.ModelCatalog{}
+		if c.modelReader != nil {
+			catalog = c.modelReader(r.Context())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(catalog)
+		return
 	case "model_usage":
 		if c.config.WebhookToken == "" {
 			writeSystemError(w, http.StatusUnauthorized, "shared secret required")

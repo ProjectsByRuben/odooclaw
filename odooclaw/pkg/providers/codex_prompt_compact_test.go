@@ -36,3 +36,19 @@ func TestCodexPromptCompactsWithoutModifyingHistory(t *testing.T) {
 		t.Fatal("history changed or compact output missing")
 	}
 }
+
+func TestJSONCompactionPreservesAllBytesExceptLayoutAndHTMLRepresentation(t *testing.T) {
+	source := `{ "n":9007199254740993123456, "decimal":1.2300e-25, "duplicate":"first", "duplicate":"second", "doc":"\u003cPDF\u003E \u0026 email ñ\n  keep spaces", "literal":"\\u003c", "nested":[null,false,{"x":"\u003c"}] }`
+	got := compactToolJSON(source)
+	expected := `{"n":9007199254740993123456,"decimal":1.2300e-25,"duplicate":"first","duplicate":"second","doc":"<PDF> & email ñ\n  keep spaces","literal":"\\u003c","nested":[null,false,{"x":"<"}]}`
+	if got != expected {
+		t.Fatalf("representation lost information:\n%s\n%s", got, expected)
+	}
+	var before, after any
+	if json.Unmarshal([]byte(source), &before) != nil || json.Unmarshal([]byte(got), &after) != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("decoded values changed")
+	}
+	doc := strings.Repeat(`\u003cdiv\u003eA \u0026 B\u003c/div\u003e`, 500)
+	compact := compactToolJSON(`{"document":"` + doc + `"}`)
+	t.Logf("HTML JSON sample: %d -> %d bytes; same decoded document", len(doc)+15, len(compact))
+}

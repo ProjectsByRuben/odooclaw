@@ -36,7 +36,7 @@ func buildCLIToolsPrompt(tools []ToolDefinition) string {
 		}
 		if len(tool.Function.Parameters) > 0 {
 			paramsJSON, _ := json.Marshal(tool.Function.Parameters)
-			sb.WriteString(fmt.Sprintf("Parameters:\n```json\n%s\n```\n", string(paramsJSON)))
+			sb.WriteString(fmt.Sprintf("Parameters:\n```json\n%s\n```\n", compactToolJSON(string(paramsJSON))))
 		}
 		sb.WriteString("\n")
 	}

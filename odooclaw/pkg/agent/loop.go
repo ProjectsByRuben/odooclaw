@@ -501,6 +501,13 @@ func (al *AgentLoop) wireOdooAllowlistCacheResetter(mcpManager *mcp.Manager) {
 			quotaChannel.SetQuotaReader(provider.NewQuotaReader())
 		}
 	}
+	if modelChannel, ok := ch.(interface {
+		SetModelReader(func(context.Context) providers.ModelCatalog)
+	}); ok {
+		if provider, ok := al.registry.GetDefaultAgent().Provider.(*providers.CodexCliProvider); ok {
+			modelChannel.SetModelReader(provider.ModelCatalog)
+		}
+	}
 	if deleter, ok := ch.(interface {
 		SetConversationDeleter(func(int, int, int) error)
 	}); ok {
@@ -1025,6 +1032,22 @@ func (al *AgentLoop) runAgentLoop(
 		al.updateToolContexts(agent, opts.Channel, opts.ChatID)
 	}
 
+	// Exact greetings/identity need only current authenticated session facts.
+	// Preserve conversation history and the existing response/usage pipeline.
+	if reply, handled := odooSessionReply(opts); handled {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
+		agent.Sessions.AddMessage(opts.SessionKey, "assistant", reply)
+		agent.Sessions.Save(opts.SessionKey)
+		if opts.SendResponse {
+			al.bus.PublishOutbound(ctx, bus.OutboundMessage{Channel: opts.Channel, ChatID: opts.ChatID, Content: reply, TokenUsage: usageSnapshot(ctx)})
+		}
+		logger.InfoCF("agent", "Answered from authenticated Odoo session without inference", map[string]any{"chat_id": opts.ChatID, "model_calls": 0})
+		return reply, nil
+	}
+
 	// 2. Build messages (skip history for heartbeat)
 	var history []providers.Message
 	var summary string
@@ -1256,6 +1279,13 @@ func (al *AgentLoop) runLLMIteration(
 		}
 	}
 
+	if opts.Channel == "odoo" && opts.Metadata["model_settings"] != "" {
+		var selection providers.ChatModelSettings
+		if err := json.Unmarshal([]byte(opts.Metadata["model_settings"]), &selection); err != nil {
+			return "", 0, err
+		}
+		ctx = providers.WithCodexSettings(ctx, selection)
+	}
 	for iteration < agent.MaxIterations {
 		iteration++
 

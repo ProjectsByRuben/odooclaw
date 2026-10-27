@@ -51,6 +51,14 @@ func (p *CodexCliProvider) NewQuotaReader() func(context.Context) ModelQuota {
 }
 
 func (p *CodexCliProvider) readQuota(ctx context.Context) (ModelQuota, error) {
+	data, err := p.readCodexRPC(ctx, "account/rateLimits/read", nil)
+	if err != nil {
+		return ModelQuota{}, err
+	}
+	return parseQuota(data)
+}
+
+func (p *CodexCliProvider) readCodexRPC(ctx context.Context, method string, params map[string]any) (json.RawMessage, error) {
 	cmd := exec.CommandContext(ctx, p.command, "app-server")
 	prepareQuotaCommand(cmd)
 	cmd.Cancel = func() error { return terminateQuotaCommand(cmd) }
@@ -66,19 +74,19 @@ func (p *CodexCliProvider) readQuota(ctx context.Context) (ModelQuota, error) {
 	cmd.Stderr = io.Discard
 	input, err := cmd.StdinPipe()
 	if err != nil {
-		return ModelQuota{}, err
+		return nil, err
 	}
 	output, err := cmd.StdoutPipe()
 	if err != nil {
-		return ModelQuota{}, err
+		return nil, err
 	}
 	if err = cmd.Start(); err != nil {
-		return ModelQuota{}, err
+		return nil, err
 	}
 	defer func() { input.Close(); terminateQuotaCommand(cmd); cmd.Wait() }()
 	encoder := json.NewEncoder(input)
 	if err = encoder.Encode(map[string]any{"id": 1, "method": "initialize", "params": map[string]any{"clientInfo": map[string]string{"name": "odooclaw_quota", "version": "1.0.0"}}}); err != nil {
-		return ModelQuota{}, err
+		return nil, err
 	}
 	scanner := bufio.NewScanner(output)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
@@ -95,20 +103,20 @@ func (p *CodexCliProvider) readQuota(ctx context.Context) (ModelQuota, error) {
 			continue
 		}
 		if len(event.Error) > 0 && string(event.Error) != "null" {
-			return ModelQuota{}, fmt.Errorf("quota RPC unavailable")
+			return nil, fmt.Errorf("quota RPC unavailable")
 		}
 		if event.ID == 1 {
 			if err = encoder.Encode(map[string]any{"method": "initialized"}); err != nil {
-				return ModelQuota{}, err
+				return nil, err
 			}
-			if err = encoder.Encode(map[string]any{"id": 2, "method": "account/rateLimits/read"}); err != nil {
-				return ModelQuota{}, err
+			if err = encoder.Encode(map[string]any{"id": 2, "method": method, "params": params}); err != nil {
+				return nil, err
 			}
 		} else {
-			return parseQuota(event.Result)
+			return event.Result, nil
 		}
 	}
-	return ModelQuota{}, fmt.Errorf("quota RPC ended without a snapshot")
+	return nil, fmt.Errorf("quota RPC ended without a snapshot")
 }
 
 func parseQuota(data []byte) (ModelQuota, error) {
