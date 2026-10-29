@@ -10,9 +10,11 @@ del producto: no los sustituyas con este documento de organización del desarrol
 Modelos por conversación, contexto explícito del registro, archivos elegidos y
 utilidades locales se han reunido en la rama `cmp/odooclaw-estable-20261016`.
 La etiqueta histórica del 16 de octubre se conserva. No integrar `upstream/main`.
-El desarrollo está en `odoo/custom/worktrees/odooclaw/desarrollo`, rama
-`dev/local` de cada componente. Crear worktrees de tarea para cambios posteriores
-si hace falta. Los cambios de un worktree no se despliegan automáticamente.
+El trabajo habitual está en este repositorio original, conservando la rama
+`cmp/odooclaw-estable-20261016`, por la organización autorizada del 29/10/2026.
+OdooClaw.code-workspace abre los tres repositorios originales; se retiraron los
+worktrees dev/local duplicados. No adoptar upstream/main ni renombrar la rama.
+Una edición no recompila ni despliega el binario: validar y desplegar expresamente.
 
 El runtime utiliza la base estable y una imagen con el binario consolidado.
 No actualizar CLI/MCP ni autenticación como parte de una compilación de Go.
